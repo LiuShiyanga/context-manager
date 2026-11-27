@@ -28,6 +28,7 @@
         </div>
         <label class="field-label" for="messages">消息 JSON</label>
         <textarea id="messages" spellcheck="false" aria-label="会话消息 JSON"></textarea>
+        <div id="artifact-content" class="artifact-preview" hidden></div>
         <div class="field-grid">
           <label>会话 ID<input id="session-id" value="demo-session"></label>
           <label>最近消息数<input id="recent-count" type="number" value="16" min="0"></label>
@@ -48,9 +49,11 @@
 
       <section class="panel budget-panel">
         <div class="section-heading"><div><span class="step">03</span><h2>Token 预算</h2></div><span class="estimate-note">离线近似估算 · 每 3 字符约 1 token</span></div>
-        <label class="budget-control">输入上限 <strong><span id="budget-value">1200</span> tokens</strong><input id="input-budget" type="range" min="100" max="5000" step="50" value="1200"></label>
+        <label class="budget-control">输入上限 <strong><span id="budget-value">8000</span> tokens</strong><input id="input-budget" type="range" min="100" max="10000" step="100" value="8000"></label>
+        <button id="budget-demo" class="text-button">演示 8k → 4k</button>
         <button id="build-button" class="primary-button"><span>构建上下文</span><span aria-hidden="true">→</span></button>
         <button id="evaluation-button" class="text-button">运行固定 Mock 评测</button>
+        <section class="panel debug-panel"><h3>本地调试（仅 mock；默认关闭）</h3><label><input id="debug-enabled" type="checkbox"> 启用模拟异常</label><select id="debug-scenario"><option value="budget_unsatisfiable">必需消息超出预算</option><option value="summary_failure">摘要 provider 失败</option><option value="artifact_missing">Artifact 缺失</option></select><button id="debug-trigger" class="text-button" disabled>触发模拟异常</button><p>异常仅用于验证错误展示，不会删除或改写会话内容。</p></section>
         <section id="evaluation-results" class="evaluation-results" hidden></section>
         <p id="error" class="error" role="alert" hidden></p>
       </section>

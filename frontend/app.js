@@ -40,6 +40,7 @@ async function readArtifact(id) {
   const output = document.querySelector('#artifact-content');
   output.hidden = false;
   output.textContent = response.ok ? body.content : body.error?.message || '无法读取 artifact';
+  output.scrollIntoView({behavior: 'smooth', block: 'nearest'});
 }
 
 document.querySelector('#load-sample').addEventListener('click', () => {
@@ -74,6 +75,32 @@ document.querySelector('#load-fixture').addEventListener('click', async () => {
 
 document.querySelector('#input-budget').addEventListener('input', (event) => {
   document.querySelector('#budget-value').textContent = event.target.value;
+});
+
+document.querySelector('#budget-demo').addEventListener('click', () => {
+  const budget = document.querySelector('#input-budget');
+  budget.value = Number(budget.value) > 5000 ? 4000 : 8000;
+  budget.dispatchEvent(new Event('input'));
+});
+
+document.querySelector('#debug-enabled').addEventListener('change', (event) => {
+  document.querySelector('#debug-trigger').disabled = !event.target.checked;
+});
+
+document.querySelector('#debug-trigger').addEventListener('click', async () => {
+  errorBox.hidden = true;
+  const scenario = document.querySelector('#debug-scenario').value;
+  try {
+    const response = await fetch('/api/debug/trigger', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({scenario}),
+    });
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.error?.message || '模拟异常');
+  } catch (error) {
+    errorBox.textContent = `${error.message}（演示调试错误；输入会话未更改）`;
+    errorBox.hidden = false;
+  }
 });
 
 button.addEventListener('click', async () => {

@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, field_validator
 
 from backend.app.schemas import ArtifactStore, ContextBuildRequest, ContextBuildResponse, MessageRequest, to_budget, to_conversation
 from backend.context.builder import BudgetUnsatisfiableError, build_context
@@ -14,6 +15,22 @@ router = APIRouter()
 ARTIFACT_STORE = ArtifactStore(Path(__file__).resolve().parents[2] / "artifacts" / "runtime" / "store")
 PROVIDER = MockProvider()
 USAGE_RECORDER = UsageRecorder(Path(__file__).resolve().parents[2] / "artifacts" / "runtime" / "usage.jsonl")
+DEBUG_ENABLED = False
+
+
+class ProviderError(RuntimeError):
+    """Raised when a mock provider failure is simulated for the demo."""
+
+
+class DebugRequest(BaseModel):
+    scenario: str
+
+    @field_validator("scenario")
+    @classmethod
+    def validate_scenario(cls, value: str) -> str:
+        if value not in {"budget_unsatisfiable", "summary_failure", "artifact_missing"}:
+            raise ValueError("Unsupported debug scenario")
+        return value
 
 
 def _error(code: str, message: str, **details):
@@ -22,29 +39,58 @@ def _error(code: str, message: str, **details):
 
 @router.get("/health")
 def health():
-    return {"status": "ok", "provider": PROVIDER.provider_name, "mode": "mock", "estimated_usage": True}
+    return {"status": "ok", "provider": PROVIDER.provider_name, "mode": "mock", "estimated_usage": True, "debug_enabled": DEBUG_ENABLED}
+
+
+@router.post("/api/debug/trigger")
+def trigger_debug(request: DebugRequest):
+    if not DEBUG_ENABLED:
+        raise HTTPException(status_code=404, detail=_error("debug_disabled", "Debug scenarios are disabled.")["error"])
+    if request.scenario == "budget_unsatisfiable":
+        raise HTTPException(
+            status_code=422,
+            detail=_error(
+                "budget_unsatisfiable",
+                "Debug scenario: required messages exceed the input budget.",
+                required_tokens=9999,
+                required_message_ids=["debug-system", "debug-user"],
+            )["error"],
+        )
+    if request.scenario == "summary_failure":
+        raise HTTPException(status_code=503, detail=_error("provider_error", "Debug scenario: mock summary provider failed.")["error"])
+    raise HTTPException(status_code=404, detail=_error("artifact_not_found", "Debug scenario: artifact is missing.")["error"])
 
 
 @router.post("/api/mock/answer")
 def mock_answer(payload: dict):
     question = str(payload.get("question", ""))
-    messages = [Message(**message) for message in payload.get("messages", [])]
-    result = PROVIDER.answer(messages, question)
+    if not isinstance(payload.get("messages", []), list):
+        raise HTTPException(status_code=422, detail=_error("invalid_request", "messages must be a list.")["error"])
+    try:
+        messages = [Message(**message) for message in payload.get("messages", [])]
+        result = PROVIDER.answer(messages, question)
+    except (TypeError, ValueError) as error:
+        raise HTTPException(status_code=422, detail=_error("invalid_request", "Invalid mock answer payload.")["error"]) from error
     USAGE_RECORDER.record(result)
     return {"answer": result.text, "usage": result.to_record()}
 
 
 @router.post("/api/mock/summarize")
 def mock_summarize(payload: dict):
-    messages = [Message(**message) for message in payload.get("messages", [])]
-    result = PROVIDER.summarize(
-        messages,
-        objective=str(payload.get("objective", "")),
-        constraints=list(payload.get("constraints", [])),
-        decisions=list(payload.get("decisions", [])),
-        todos=list(payload.get("todos", [])),
-        tool_conclusions=list(payload.get("tool_conclusions", [])),
-    )
+    try:
+        messages = [Message(**message) for message in payload.get("messages", [])]
+        result = PROVIDER.summarize(
+            messages,
+            objective=str(payload.get("objective", "")),
+            constraints=list(payload.get("constraints", [])),
+            decisions=list(payload.get("decisions", [])),
+            todos=list(payload.get("todos", [])),
+            tool_conclusions=list(payload.get("tool_conclusions", [])),
+        )
+    except ProviderError as error:
+        raise HTTPException(status_code=503, detail=_error("provider_error", str(error))["error"]) from error
+    except (TypeError, ValueError) as error:
+        raise HTTPException(status_code=422, detail=_error("invalid_request", "Invalid mock summary payload.")["error"]) from error
     USAGE_RECORDER.record(result)
     return {"summary": result.text, "usage": result.to_record()}
 
