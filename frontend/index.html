@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Context Manager Demo</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main class="layout">
+    <section class="workspace">
+      <header class="topbar">
+        <div class="brand"><span class="brand-mark">C</span><div><strong>Context Manager</strong><small>上下文工作台</small></div></div>
+        <div class="status"><span class="dot"></span>Mock 模式 · 本地处理</div>
+      </header>
+
+      <section class="hero">
+        <p class="eyebrow">CONTEXT WORKSPACE</p>
+        <h1>让重要上下文<br><span>始终留在对话中。</span></h1>
+        <p class="lead">管理对话、压缩历史，并清晰掌控每一段上下文的预算与来源。</p>
+      </section>
+
+      <section class="panel conversation-panel">
+        <div class="section-heading"><div><span class="step">01</span><h2>会话内容</h2></div><button id="load-sample" class="text-button">载入示例</button></div>
+        <label class="field-label" for="messages">消息 JSON</label>
+        <textarea id="messages" spellcheck="false" aria-label="会话消息 JSON"></textarea>
+        <div class="field-grid">
+          <label>会话 ID<input id="session-id" value="demo-session"></label>
+          <label>最近消息数<input id="recent-count" type="number" value="4" min="0"></label>
+          <label>工具结果截断字符数<input id="tool-limit" type="number" value="500" min="0"></label>
+        </div>
+      </section>
+
+      <section class="panel metadata-panel">
+        <div class="section-heading"><div><span class="step">02</span><h2>结构化记忆</h2></div><span class="optional">可选</span></div>
+        <div class="field-grid memory-grid">
+          <label>目标<input id="objective" placeholder="本次会话要完成什么"></label>
+          <label>约束（每行一条）<textarea id="constraints" class="short-area"></textarea></label>
+          <label>决策（每行一条）<textarea id="decisions" class="short-area"></textarea></label>
+          <label>待办（每行一条）<textarea id="todos" class="short-area"></textarea></label>
+          <label>工具结论（每行一条）<textarea id="tool-conclusions" class="short-area"></textarea></label>
+        </div>
+      </section>
+
+      <section class="panel budget-panel">
+        <div class="section-heading"><div><span class="step">03</span><h2>Token 预算</h2></div><span class="estimate-note">离线近似估算 · 每 3 字符约 1 token</span></div>
+        <label class="budget-control">输入上限 <strong><span id="budget-value">1200</span> tokens</strong><input id="input-budget" type="range" min="100" max="5000" step="50" value="1200"></label>
+        <button id="build-button" class="primary-button"><span>构建上下文</span><span aria-hidden="true">→</span></button>
+        <p id="error" class="error" role="alert" hidden></p>
+      </section>
+
+      <footer>本地演示 · 内容只用于当前构建请求</footer>
+    </section>
+
+    <aside class="results" id="results" aria-live="polite">
+      <div class="empty-state"><div class="empty-icon">⌘</div><p class="eyebrow">YOUR CONTEXT</p><h2>等待构建</h2><p>配置会话和预算后，构建结果会显示在这里。</p><div class="empty-lines"><i></i><i></i><i></i></div></div>
+    </aside>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>
