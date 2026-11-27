@@ -5,10 +5,14 @@ from fastapi import APIRouter, HTTPException
 from backend.app.schemas import ArtifactStore, ContextBuildRequest, ContextBuildResponse, MessageRequest, to_budget, to_conversation
 from backend.context.builder import BudgetUnsatisfiableError, build_context
 from backend.context.models import Message
+from backend.context.providers import MockProvider
+from backend.context.usage import UsageRecorder
 from backend.data.store import FIXTURES
 
 router = APIRouter()
 ARTIFACT_STORE = ArtifactStore(Path(__file__).resolve().parents[2] / "artifacts" / "runtime" / "store")
+PROVIDER = MockProvider()
+USAGE_RECORDER = UsageRecorder(Path(__file__).resolve().parents[2] / "artifacts" / "runtime" / "usage.jsonl")
 
 
 def _error(code: str, message: str, **details):
@@ -17,7 +21,31 @@ def _error(code: str, message: str, **details):
 
 @router.get("/health")
 def health():
-    return {"status": "ok", "provider": "mock"}
+    return {"status": "ok", "provider": PROVIDER.provider_name, "mode": "mock", "estimated_usage": True}
+
+
+@router.post("/api/mock/answer")
+def mock_answer(payload: dict):
+    question = str(payload.get("question", ""))
+    messages = [Message(**message) for message in payload.get("messages", [])]
+    result = PROVIDER.answer(messages, question)
+    USAGE_RECORDER.record(result)
+    return {"answer": result.text, "usage": result.to_record()}
+
+
+@router.post("/api/mock/summarize")
+def mock_summarize(payload: dict):
+    messages = [Message(**message) for message in payload.get("messages", [])]
+    result = PROVIDER.summarize(
+        messages,
+        objective=str(payload.get("objective", "")),
+        constraints=list(payload.get("constraints", [])),
+        decisions=list(payload.get("decisions", [])),
+        todos=list(payload.get("todos", [])),
+        tool_conclusions=list(payload.get("tool_conclusions", [])),
+    )
+    USAGE_RECORDER.record(result)
+    return {"summary": result.text, "usage": result.to_record()}
 
 
 @router.get("/api/sessions/synthetic-garden-80")
