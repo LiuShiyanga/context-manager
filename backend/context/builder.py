@@ -4,6 +4,7 @@ from dataclasses import replace
 from hashlib import sha256
 
 from backend.context.models import ContextResult, Conversation, Message, TokenBudget
+from backend.context.tokens import DEFAULT_TOKEN_COUNTER, TokenCounter
 
 
 class BudgetUnsatisfiableError(ValueError):
@@ -15,11 +16,11 @@ class BudgetUnsatisfiableError(ValueError):
 
 def estimate_tokens(text: str) -> int:
     """Conservative, clearly approximate offline token estimate."""
-    return max(1, (len(text) + 2) // 3) if text else 0
+    return DEFAULT_TOKEN_COUNTER.count_text(text)
 
 
-def _message_tokens(message: Message) -> int:
-    return estimate_tokens(message.content) + estimate_tokens(message.role) + 2
+def _message_tokens(message: Message, counter: TokenCounter) -> int:
+    return counter.count_text(message.content) + counter.count_text(message.role) + 2
 
 
 def build_context(
@@ -28,75 +29,75 @@ def build_context(
     *,
     recent_message_count: int = 8,
     tool_result_char_limit: int = 1200,
+    token_counter: TokenCounter = DEFAULT_TOKEN_COUNTER,
 ) -> ContextResult:
     if budget.input_tokens < 0 or budget.output_tokens < 0:
         raise ValueError("Token budgets must be non-negative")
+    if recent_message_count < 0 or tool_result_char_limit < 0:
+        raise ValueError("Message count and tool result limit must be non-negative")
+    ids = [message.id for message in conversation.messages]
+    if len(ids) != len(set(ids)):
+        raise ValueError("Message IDs must be unique within a conversation")
 
     artifacts: dict[str, str] = {}
     prepared: list[Message] = []
     for message in conversation.messages:
         if message.role == "tool" and len(message.content) > tool_result_char_limit:
-            artifact_id = message.artifact_id or f"artifact-{sha256(f'{conversation.session_id}:{message.id}'.encode()).hexdigest()[:20]}"
+            # Never trust an artifact ID supplied by the caller.
+            artifact_id = f"artifact-{sha256(f'{conversation.session_id}:{message.id}:{message.content}'.encode()).hexdigest()[:24]}"
             artifacts[artifact_id] = message.content
             excerpt = message.content[:tool_result_char_limit]
-            prepared.append(
-                replace(
-                    message,
-                    content=f"{excerpt}\n[Truncated; read_artifact({artifact_id}) for full result.]",
-                    artifact_id=artifact_id,
-                )
-            )
+            prepared.append(replace(message, content=f"{excerpt}\n[Full result stored as {artifact_id}]", artifact_id=artifact_id))
         else:
             prepared.append(message)
 
-    system_messages = [message for message in prepared if message.role == "system"]
-    non_system = [message for message in prepared if message.role != "system"]
-    recent = non_system[-max(0, recent_message_count):] if recent_message_count else []
-    latest_user = next((message for message in reversed(non_system) if message.role == "user"), None)
-    omitted = [message for message in non_system if message not in recent and message is not latest_user]
-    summary_message = None
-    if omitted and any((conversation.objective, conversation.constraints, conversation.decisions, conversation.todos, conversation.tool_conclusions)):
-        summary_parts = ([f"Objective: {conversation.objective}"] if conversation.objective else [])
-        summary_parts.extend(f"Constraint/decision: {item}" for item in conversation.constraints + conversation.decisions)
-        summary_parts.extend(f"Open todo: {item}" for item in conversation.todos)
-        summary_parts.extend(f"Tool conclusion: {item}" for item in conversation.tool_conclusions)
-        summary_content = "\n".join(summary_parts)
-        summary_message = Message(
-            id=f"summary-{omitted[0].id}-{omitted[-1].id}",
-            role="summary",
-            content=summary_content,
-            source_ids=[message.id for message in omitted],
-        )
-    required = system_messages + ([latest_user] if latest_user else [])
-    required_tokens = sum(_message_tokens(message) for message in required)
+    system = [message for message in prepared if message.role == "system"]
+    latest_user = next((message for message in reversed(prepared) if message.role == "user"), None)
+    required = system + ([latest_user] if latest_user and latest_user not in system else [])
+    required_tokens = sum(_message_tokens(message, token_counter) for message in required)
     if required_tokens > budget.input_tokens:
         raise BudgetUnsatisfiableError(required_tokens, [message.id for message in required])
 
-    if summary_message:
-        summary_tokens = _message_tokens(summary_message)
-        if summary_tokens <= budget.input_tokens - required_tokens:
-            required.append(summary_message)
-            required_tokens += summary_tokens
-        else:
-            summary_message = None
+    selected: list[Message] = list(required)
+    selected_ids = {message.id for message in selected}
+    remaining = budget.input_tokens - required_tokens
 
-    selected_ids = {message.id for message in required}
-    selected = list(required)
-    remaining = budget.input_tokens - sum(_message_tokens(message) for message in selected)
-    for message in reversed(recent):
-        if message.id in selected_ids:
-            continue
-        cost = _message_tokens(message)
+    # The recent window is based on the source conversation, including required messages.
+    recent_window = prepared[-recent_message_count:] if recent_message_count else []
+    candidates = [message for message in recent_window if message.id not in selected_ids and message.role != "summary"]
+    for message in reversed(candidates):
+        cost = _message_tokens(message, token_counter)
         if cost <= remaining:
             selected.append(message)
             selected_ids.add(message.id)
             remaining -= cost
 
-    selected.sort(key=lambda message: next((index for index, source in enumerate(prepared) if source.id == message.id), -1))
+    omitted = [message for message in prepared if message.id not in selected_ids and message.role != "system"]
+    summary = None
+    if omitted:
+        source_ids = [message.id for message in omitted]
+        summary_content = "\n".join(
+            part for part in [
+                f"Objective: {conversation.objective}" if conversation.objective else "",
+                "Constraints: " + "; ".join(conversation.constraints) if conversation.constraints else "",
+                "Decisions: " + "; ".join(conversation.decisions) if conversation.decisions else "",
+                "Todos: " + "; ".join(conversation.todos) if conversation.todos else "",
+                "Tool conclusions: " + "; ".join(conversation.tool_conclusions) if conversation.tool_conclusions else "",
+            ] if part
+        )
+        if summary_content:
+            summary = Message(id="summary-generated", role="summary", content=summary_content, source_ids=source_ids)
+            summary_cost = _message_tokens(summary, token_counter)
+            if summary_cost <= remaining:
+                selected.append(summary)
+                selected_ids.add(summary.id)
+                remaining -= summary_cost
+
+    selected.sort(key=lambda message: next((index for index, source in enumerate(prepared) if source.id == message.id), len(prepared)))
     counts = {"system": 0, "summary": 0, "recent": 0, "tools": 0}
     for message in selected:
         key = "system" if message.role == "system" else "summary" if message.role == "summary" else "tools" if message.role == "tool" else "recent"
-        counts[key] += _message_tokens(message)
+        counts[key] += _message_tokens(message, token_counter)
     total = sum(counts.values())
     return ContextResult(
         messages=selected,
@@ -104,5 +105,5 @@ def build_context(
         partitions=counts,
         artifacts=artifacts,
         omitted_message_ids=[message.id for message in prepared if message.id not in selected_ids],
-        estimated=True,
+        estimated=token_counter.estimated,
     )

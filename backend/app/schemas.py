@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from backend.context.models import Conversation, Message, TokenBudget
 
@@ -12,6 +14,20 @@ class MessageRequest(BaseModel):
     tool_name: str | None = None
     artifact_id: str | None = None
     source_ids: list[str] = Field(default_factory=list)
+
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, value: str) -> str:
+        if value not in {"system", "user", "assistant", "tool", "summary"}:
+            raise ValueError("Unsupported message role")
+        return value
+
+    @field_validator("id")
+    @classmethod
+    def validate_id(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Message id cannot be empty")
+        return value
 
 
 class ContextBuildRequest(BaseModel):
@@ -25,6 +41,23 @@ class ContextBuildRequest(BaseModel):
     decisions: list[str] = Field(default_factory=list)
     todos: list[str] = Field(default_factory=list)
     tool_conclusions: list[str] = Field(default_factory=list)
+
+    @field_validator("messages")
+    @classmethod
+    def validate_unique_message_ids(cls, value: list[MessageRequest]) -> list[MessageRequest]:
+        ids = [message.id for message in value]
+        if len(ids) != len(set(ids)):
+            raise ValueError("Message IDs must be unique within a conversation")
+        return value
+
+    @field_validator("budget")
+    @classmethod
+    def validate_budget(cls, value: dict[str, int]) -> dict[str, int]:
+        if set(value) - {"input_tokens", "output_tokens"}:
+            raise ValueError("Budget only accepts input_tokens and output_tokens")
+        if value.get("input_tokens", 0) < 0 or value.get("output_tokens", 0) < 0:
+            raise ValueError("Token budgets must be non-negative")
+        return value
 
 
 class ContextBuildResponse(BaseModel):
@@ -41,7 +74,7 @@ class ContextBuildResponse(BaseModel):
 def to_conversation(request: ContextBuildRequest) -> Conversation:
     return Conversation(
         session_id=request.session_id,
-        messages=[Message(**item.model_dump()) for item in request.messages],
+        messages=[Message(**message.model_dump()) for message in request.messages],
         objective=request.objective,
         constraints=request.constraints,
         decisions=request.decisions,
@@ -68,6 +101,10 @@ class ArtifactStore:
         path = (self.root / f"{artifact_id}.txt").resolve()
         if self.root not in path.parents:
             raise ValueError("Artifact path escaped store")
+        if path.exists():
+            if path.read_text(encoding="utf-8") != content:
+                raise ValueError("Artifact ID collision")
+            return
         path.write_text(content, encoding="utf-8")
 
     def get(self, artifact_id: str) -> str | None:
