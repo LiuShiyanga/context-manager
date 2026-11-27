@@ -1,0 +1,24 @@
+# Local secrets
+.env
+.env.*
+!.env.example
+
+# Task reference images (user-provided, do not publish)
+/task/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Node
+node_modules/
+dist/
+
+# Local Claude Code/worktree metadata
+/.claude/
+
+# Runtime artifacts
+/artifacts/runtime/
