@@ -1,8 +1,8 @@
 # Context Manager Demo
 
-一个可在本机运行的上下文管理工作台：粘贴对话消息，整理目标、约束、决策与待办，按输入 token 预算构建上下文，并查看消息分区、摘要及被省略的消息。长工具结果会保存为本地 artifact，构建结果提供可取回的 artifact ID。
+一个本地上下文管理工作台：选择固定合成会话，整理目标/约束/决定/待办，按预算构建上下文，查看消息分区、来源摘要及可取回的工具 artifact。固定样本包括 80 轮对话和 10 道评测题。
 
-当前版本使用确定性的离线近似 token 估算（每 3 个字符约 1 token），不调用外部模型或服务。
+**当前 Provider 固定为 deterministic mock。** 不调用真实模型或外部服务；token 数是离线字符估算，不是精确 tokenizer 计数。Mock 评测仅验证流程，不代表模型质量，不应用于质量结论或生产建议。
 
 ## 环境要求
 
@@ -14,10 +14,13 @@
 ```text
 backend/
   app/        FastAPI 路由、请求/响应模型与 artifact 存储
-  context/    token 估算、上下文筛选与结构化摘要
-  tests/      策略核心与 API 回归测试
-frontend/     无构建步骤的静态演示工作台
-artifacts/    本地运行时生成的工具结果（已 gitignore）
+  context/    token counter、上下文筛选、mock provider 与 usage 元数据
+  data/       版本化合成会话、评测题、哈希清单
+  tests/      策略、provider、评测与 API 回归测试
+  evaluation.py  可重复的 mock 流程评测入口
+frontend/     无构建步骤的本地演示工作台
+artifacts/    本地运行时生成的 artifact 和 usage 元数据（已 gitignore）
+reports/      本地生成的评测报告（可按需归档）
 ```
 
 建议阅读顺序：`backend/context/models.py` → `backend/context/builder.py` → `backend/app/schemas.py` → `backend/app/routes.py` → `frontend/app.js`。
@@ -28,7 +31,7 @@ artifacts/    本地运行时生成的工具结果（已 gitignore）
 - 将省略历史的目标、约束/决策、待办和工具结论组成可追踪摘要。
 - 超长工具结果以稳定 artifact ID 引用，并支持通过 API 取回完整内容。
 - 输入预算放不下必需消息时明确返回错误，不静默丢弃必需内容。
-- 当前只实现 mock/离线演示：不调用真实模型，没有真实质量评测、80 轮固定数据集或调试异常注入面板。
+- 当前只实现 mock/离线演示：不调用真实模型，没有真实质量评测或调试异常注入面板。
 
 ## 安装与启动
 
@@ -41,9 +44,21 @@ uv run uvicorn backend.app.main:app --reload
 
 ## API
 
-- `GET /health`：返回服务状态及 mock provider 标记。
+- `GET /health`：检查服务状态、mock provider 和估算标记。
+- `GET /api/sessions/synthetic-garden-80?turns=10|40|80`：加载固定版本合成会话。
+- `GET /api/evaluations/questions`：加载固定评测问题。
+- `GET /api/evaluations/run?input_budget=4096`：运行确定性 mock 流程对比；不调用真实 provider。
+- `POST /api/mock/answer` 与 `POST /api/mock/summarize`：显式的 mock provider 演示端点。
 - `POST /api/context/build`：根据消息、结构化记忆和预算构建上下文。
 - `GET /api/artifacts/{artifact_id}`：取回完整工具结果。
+
+生成固定评测报告：
+
+```bash
+uv run python -m backend.evaluation --input-budget 4096 --output reports/mock-evaluation.json
+```
+
+报告包括数据版本、fixture SHA-256、预算与 provider 配置、每题流程的 token 统计、`real_provider_requests: 0` 和评分限制。Mock expected-term 检查不是模型质量指标。
 
 构建请求示例：
 

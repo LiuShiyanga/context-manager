@@ -2,67 +2,82 @@ const sampleMessages = [
   {id: 'system-1', role: 'system', content: 'You are a careful engineering assistant. Preserve user goals, decisions, and active constraints.'},
   {id: 'user-1', role: 'user', content: 'Help me investigate why background jobs occasionally retry after completing.'},
   {id: 'assistant-1', role: 'assistant', content: 'I will trace the worker acknowledgement and retry flow, then identify where completion state can be lost.'},
-  {id: 'tool-1', role: 'tool', tool_name: 'search_logs', content: 'Several completed jobs show an acknowledgement timeout after the worker has persisted the result. The retry consumer checks the queue receipt, but the receipt is not refreshed after long-running tasks. '.repeat(5)},
-  {id: 'assistant-2', role: 'assistant', content: 'The likely cause is a stale queue receipt for long-running tasks. Refresh the receipt while processing and acknowledge only after the result is persisted.'},
-  {id: 'user-2', role: 'user', content: 'Keep the change backward compatible and include a focused regression test.'},
-  {id: 'assistant-3', role: 'assistant', content: 'Understood. I will preserve the existing queue contract and add a test for a task that runs beyond the receipt interval.'},
-  {id: 'user-3', role: 'user', content: 'What should we verify before deploying?'},
+  {id: 'tool-1', role: 'tool', tool_name: 'search_logs', content: 'Synthetic tool result example: completed jobs show acknowledgement timeout; refresh the receipt during long-running work. '.repeat(12)},
+  {id: 'assistant-2', role: 'assistant', content: 'The likely cause is a stale queue receipt. Refresh it during processing and acknowledge only after persistence.'},
+  {id: 'user-2', role: 'user', content: 'Keep the change backward compatible and add a regression test.'},
+  {id: 'assistant-3', role: 'assistant', content: 'I will preserve the current queue contract and test delayed acknowledgement behavior.'},
+  {id: 'user-3', role: 'user', content: 'What should happen if receipt refresh fails?'},
+  {id: 'assistant-4', role: 'assistant', content: 'Stop processing safely, retain the persisted state, and let the retry policy handle recovery.'},
 ];
 
-const messagesField = document.querySelector('#messages');
-const results = document.querySelector('#results');
-const button = document.querySelector('#build-button');
+const messageBox = document.querySelector('#messages');
 const errorBox = document.querySelector('#error');
-const budgetSlider = document.querySelector('#input-budget');
+const button = document.querySelector('#build-button');
+const results = document.querySelector('#results');
 
-document.querySelector('#load-sample').addEventListener('click', () => {
-  messagesField.value = JSON.stringify(sampleMessages, null, 2);
-  document.querySelector('#session-id').value = 'retry-investigation';
-  document.querySelector('#objective').value = 'Find and fix duplicate retries of completed background jobs.';
-  document.querySelector('#constraints').value = 'Keep the queue contract backward compatible.\nAcknowledge only after results are persisted.';
-  document.querySelector('#decisions').value = 'Refresh the queue receipt during long-running tasks.';
-  document.querySelector('#todos').value = 'Add a regression test for tasks exceeding the receipt interval.\nVerify completed tasks are acknowledged exactly once.';
-  document.querySelector('#tool-conclusions').value = 'Logs show stale queue receipts when long-running tasks exceed the receipt interval.';
-});
-
-budgetSlider.addEventListener('input', () => {
-  document.querySelector('#budget-value').textContent = budgetSlider.value;
-});
-
-function lines(id) {
-  return document.querySelector(id).value.split('\n').map((value) => value.trim()).filter(Boolean);
-}
-
-function safeText(value) {
-  return String(value).replace(/[&<>"']/g, (character) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[character]));
+function lines(selector) {
+  return document.querySelector(selector).value.split('\n').map((value) => value.trim()).filter(Boolean);
 }
 
 function renderResult(data) {
-  const budget = Number(budgetSlider.value);
-  const usage = Math.min(100, Math.round(data.input_tokens / budget * 100));
-  const labels = {system: '系统指令', summary: '结构化摘要', recent: '近期消息', tools: '工具结果'};
-  const partitions = Object.entries(data.partitions).map(([key, value]) => `<div class="partition"><span>${labels[key] || safeText(key)}</span><strong>${value} tokens</strong></div>`).join('');
   const messages = data.messages.map((message) => {
-    const role = message.role === 'summary' ? '结构化摘要' : message.role === 'tool' ? `工具 · ${message.tool_name || ''}` : message.role === 'system' ? '系统' : message.role === 'assistant' ? '助手' : '用户';
-    const artifact = message.artifact_id ? `<a class="artifact-link" href="/api/artifacts/${encodeURIComponent(message.artifact_id)}" target="_blank" rel="noopener">↗ 查看完整工具结果 · ${safeText(message.artifact_id)}</a>` : '';
-    return `<article class="message-card"><div class="message-meta"><strong>${safeText(role)}</strong><span>${safeText(message.id)}</span></div><pre class="message-content">${safeText(message.content)}</pre>${artifact}</article>`;
+    const sourceInfo = message.source_ids?.length ? `<small>来源: ${message.source_ids.join(', ')}</small>` : '';
+    const artifact = message.artifact_id ? `<button class="text-button" data-artifact="${message.artifact_id}">查看完整工具结果</button>` : '';
+    return `<article class="message-card"><div><strong>${message.role}</strong><span>${message.id}</span></div><p>${escapeHtml(message.content)}</p>${sourceInfo}${artifact}</article>`;
   }).join('');
-  const omitted = data.omitted_message_ids.length ? `<p class="omitted"><strong>未纳入上下文：</strong>${data.omitted_message_ids.map(safeText).join(' · ')}</p>` : '';
-  results.innerHTML = `<div class="result-header"><div><h2>构建结果</h2><p>会话 ${safeText(data.session_id)} · 离线估算</p></div><span class="token-pill">${data.input_tokens} tokens</span></div><section class="meter-card"><div class="meter-title"><span>输入预算使用</span><strong>${data.input_tokens} / ${budget}</strong></div><div class="meter"><i style="width:${usage}%"></i></div><div class="partitions">${partitions}</div></section>${messages}${omitted}`;
+  const partitions = Object.entries(data.partitions).map(([key, value]) => `<li><span>${key}</span><strong>${value}</strong></li>`).join('');
+  results.innerHTML = `<section class="panel result-panel"><p class="eyebrow">BUILT CONTEXT</p><h2>${data.input_tokens} / ${document.querySelector('#input-budget').value} tokens</h2><p>${data.estimated ? '离线估算值' : '精确计数'}</p><h3>预算分区</h3><ul class="partition-list">${partitions}</ul><h3>保留消息</h3>${messages}<h3>省略消息 (${data.omitted_message_ids.length})</h3><p>${data.omitted_message_ids.join(', ') || '无'}</p><h3>可取回 Artifacts (${data.artifacts.length})</h3><ul>${data.artifacts.map((id) => `<li><button class="text-button" data-artifact="${id}">${id}</button></li>`).join('')}</ul><pre id="artifact-content" hidden></pre></section>`;
+  results.querySelectorAll('[data-artifact]').forEach((element) => element.addEventListener('click', () => readArtifact(element.dataset.artifact)));
 }
+
+function escapeHtml(value) {
+  return value.replace(/[&<>"']/g, (character) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[character]));
+}
+
+async function readArtifact(id) {
+  const response = await fetch(`/api/artifacts/${encodeURIComponent(id)}`);
+  const body = await response.json();
+  const output = document.querySelector('#artifact-content');
+  output.hidden = false;
+  output.textContent = response.ok ? body.content : body.error?.message || '无法读取 artifact';
+}
+
+document.querySelector('#load-sample').addEventListener('click', () => {
+  messageBox.value = JSON.stringify(sampleMessages, null, 2);
+  document.querySelector('#session-id').value = 'demo-session';
+  document.querySelector('#objective').value = 'Investigate safe retry behavior.';
+  document.querySelector('#constraints').value = 'Keep backward compatible\nDo not lose persisted results';
+  document.querySelector('#decisions').value = 'Acknowledge only after persistence';
+  document.querySelector('#todos').value = 'Add delayed acknowledgement regression test';
+  document.querySelector('#tool-conclusions').value = 'Synthetic fixture only; not production data';
+});
+
+document.querySelector('#load-fixture').addEventListener('click', async () => {
+  errorBox.hidden = true;
+  try {
+    const turns = document.querySelector('#fixture-turns').value;
+    const response = await fetch(`/api/sessions/synthetic-garden-80?turns=${turns}`);
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.error?.message || '无法加载固定会话');
+    messageBox.value = JSON.stringify(body.messages, null, 2);
+    document.querySelector('#session-id').value = body.session_id;
+    document.querySelector('#objective').value = body.objective;
+    document.querySelector('#constraints').value = body.constraints.join('\n');
+    document.querySelector('#decisions').value = body.decisions.join('\n');
+    document.querySelector('#todos').value = body.todos.join('\n');
+    document.querySelector('#tool-conclusions').value = '固定版本合成样本；不得作为真实建议';
+  } catch (error) {
+    errorBox.textContent = error.message;
+    errorBox.hidden = false;
+  }
+});
+
+document.querySelector('#input-budget').addEventListener('input', (event) => {
+  document.querySelector('#budget-value').textContent = event.target.value;
+});
 
 button.addEventListener('click', async () => {
   errorBox.hidden = true;
-  let messages;
-  try {
-    messages = JSON.parse(messagesField.value);
-    if (!Array.isArray(messages)) throw new Error('消息内容必须是 JSON 数组。');
-  } catch (error) {
-    errorBox.textContent = error instanceof SyntaxError ? `JSON 格式错误：${error.message}` : error.message;
-    errorBox.hidden = false;
-    return;
-  }
-
   button.disabled = true;
   button.firstElementChild.textContent = '正在构建…';
   try {
@@ -70,16 +85,14 @@ button.addEventListener('click', async () => {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
-        session_id: document.querySelector('#session-id').value || 'demo-session',
-        messages,
-        budget: {input_tokens: Number(budgetSlider.value), output_tokens: 256},
+        session_id: document.querySelector('#session-id').value.trim() || 'demo-session',
+        messages: JSON.parse(messageBox.value),
+        budget: {input_tokens: Number(document.querySelector('#input-budget').value), output_tokens: 256},
         recent_message_count: Number(document.querySelector('#recent-count').value),
         tool_result_char_limit: Number(document.querySelector('#tool-limit').value),
         objective: document.querySelector('#objective').value.trim(),
-        constraints: lines('#constraints'),
-        decisions: lines('#decisions'),
-        todos: lines('#todos'),
-        tool_conclusions: lines('#tool-conclusions'),
+        constraints: lines('#constraints'), decisions: lines('#decisions'),
+        todos: lines('#todos'), tool_conclusions: lines('#tool-conclusions'),
       }),
     });
     const body = await response.json();
@@ -91,6 +104,20 @@ button.addEventListener('click', async () => {
   } finally {
     button.disabled = false;
     button.firstElementChild.textContent = '构建上下文';
+  }
+});
+
+document.querySelector('#evaluation-button').addEventListener('click', async () => {
+  const panel = document.querySelector('#evaluation-results');
+  panel.hidden = false;
+  panel.textContent = '正在运行固定 Mock 评测…';
+  try {
+    const response = await fetch('/api/evaluations/run?input_budget=' + encodeURIComponent(document.querySelector('#input-budget').value));
+    const report = await response.json();
+    if (!response.ok) throw new Error(report.error?.message || '评测失败');
+    panel.innerHTML = `<h3>Mock 流程比较</h3><p>${escapeHtml(report.quality_conclusion)}</p><p>数据版本 ${report.dataset_version} · 真实请求 ${report.real_provider_requests}</p>${report.results.map((row) => `<article><strong>${row.question_id}</strong><p>截断流程: ${row.baseline.input_tokens} estimated tokens · 管理流程: ${row.managed.input_tokens} estimated tokens</p><small>${escapeHtml(row.scoring_note)}</small></article>`).join('')}`;
+  } catch (error) {
+    panel.textContent = error.message;
   }
 });
 
