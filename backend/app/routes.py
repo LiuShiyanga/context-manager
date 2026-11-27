@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException
 from backend.app.schemas import ArtifactStore, ContextBuildRequest, ContextBuildResponse, MessageRequest, to_budget, to_conversation
 from backend.context.builder import BudgetUnsatisfiableError, build_context
 from backend.context.models import Message
+from backend.data.store import FIXTURES
 
 router = APIRouter()
 ARTIFACT_STORE = ArtifactStore(Path(__file__).resolve().parents[2] / "artifacts" / "runtime" / "store")
@@ -17,6 +18,20 @@ def _error(code: str, message: str, **details):
 @router.get("/health")
 def health():
     return {"status": "ok", "provider": "mock"}
+
+
+@router.get("/api/sessions/synthetic-garden-80")
+def read_synthetic_session(turns: int = 80):
+    try:
+        session = FIXTURES.session_slice(turns)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=_error("invalid_turn_count", str(error))["error"]) from error
+    return session
+
+
+@router.get("/api/evaluations/questions")
+def read_evaluation_questions():
+    return FIXTURES.questions
 
 
 @router.post("/api/context/build", response_model=ContextBuildResponse)
