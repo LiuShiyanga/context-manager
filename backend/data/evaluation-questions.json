@@ -1,0 +1,84 @@
+{
+  "schema_version": "1.0.0",
+  "dataset_version": "1.0.0",
+  "synthetic": true,
+  "questions": [
+    {
+      "id": "q01",
+      "prompt": "项目的总体目标是什么？",
+      "expected_terms": [
+        "社区花园",
+        "低耗水"
+      ]
+    },
+    {
+      "id": "q02",
+      "prompt": "有哪些不可违反的约束？",
+      "expected_terms": [
+        "无障碍",
+        "合成数据"
+      ]
+    },
+    {
+      "id": "q03",
+      "prompt": "分成多少个种植区？",
+      "expected_terms": [
+        "八个"
+      ]
+    },
+    {
+      "id": "q04",
+      "prompt": "工具目录结果应如何使用？",
+      "expected_terms": [
+        "虚构"
+      ]
+    },
+    {
+      "id": "q05",
+      "prompt": "有哪些尚未完成的事项？",
+      "expected_terms": [
+        "志愿者排班",
+        "材料清单"
+      ]
+    },
+    {
+      "id": "q06",
+      "prompt": "花园计划优先考虑什么植物特征？",
+      "expected_terms": [
+        "低耗水",
+        "本地适生"
+      ]
+    },
+    {
+      "id": "q07",
+      "prompt": "维护计划应兼顾什么通行要求？",
+      "expected_terms": [
+        "无障碍通道"
+      ]
+    },
+    {
+      "id": "q08",
+      "prompt": "样本里是否包含真实采购信息？",
+      "expected_terms": [
+        "不",
+        "虚构"
+      ]
+    },
+    {
+      "id": "q09",
+      "prompt": "目录示例数据是什么性质？",
+      "expected_terms": [
+        "合成",
+        "虚构"
+      ]
+    },
+    {
+      "id": "q10",
+      "prompt": "本演示可以据此给出现实施工建议吗？",
+      "expected_terms": [
+        "不",
+        "虚构"
+      ]
+    }
+  ]
+}

@@ -22,11 +22,15 @@
 
       <section class="panel conversation-panel">
         <div class="section-heading"><div><span class="step">01</span><h2>会话内容</h2></div><button id="load-sample" class="text-button">载入示例</button></div>
+        <div class="field-grid">
+          <label>固定合成会话轮次<select id="fixture-turns"><option value="10">10 轮</option><option value="40">40 轮</option><option value="80" selected>80 轮</option></select></label>
+          <button id="load-fixture" class="text-button">载入固定会话</button>
+        </div>
         <label class="field-label" for="messages">消息 JSON</label>
         <textarea id="messages" spellcheck="false" aria-label="会话消息 JSON"></textarea>
         <div class="field-grid">
           <label>会话 ID<input id="session-id" value="demo-session"></label>
-          <label>最近消息数<input id="recent-count" type="number" value="4" min="0"></label>
+          <label>最近消息数<input id="recent-count" type="number" value="16" min="0"></label>
           <label>工具结果截断字符数<input id="tool-limit" type="number" value="500" min="0"></label>
         </div>
       </section>
@@ -46,6 +50,8 @@
         <div class="section-heading"><div><span class="step">03</span><h2>Token 预算</h2></div><span class="estimate-note">离线近似估算 · 每 3 字符约 1 token</span></div>
         <label class="budget-control">输入上限 <strong><span id="budget-value">1200</span> tokens</strong><input id="input-budget" type="range" min="100" max="5000" step="50" value="1200"></label>
         <button id="build-button" class="primary-button"><span>构建上下文</span><span aria-hidden="true">→</span></button>
+        <button id="evaluation-button" class="text-button">运行固定 Mock 评测</button>
+        <section id="evaluation-results" class="evaluation-results" hidden></section>
         <p id="error" class="error" role="alert" hidden></p>
       </section>
 
