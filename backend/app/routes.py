@@ -8,6 +8,7 @@ from backend.context.models import Message
 from backend.context.providers import MockProvider
 from backend.context.usage import UsageRecorder
 from backend.data.store import FIXTURES
+from backend.evaluation import run_evaluation
 
 router = APIRouter()
 ARTIFACT_STORE = ArtifactStore(Path(__file__).resolve().parents[2] / "artifacts" / "runtime" / "store")
@@ -60,6 +61,13 @@ def read_synthetic_session(turns: int = 80):
 @router.get("/api/evaluations/questions")
 def read_evaluation_questions():
     return FIXTURES.questions
+
+
+@router.get("/api/evaluations/run")
+def get_mock_evaluation(input_budget: int = 4096):
+    if input_budget < 1:
+        raise HTTPException(status_code=422, detail=_error("invalid_budget", "input_budget must be positive.")["error"])
+    return run_evaluation(input_budget)
 
 
 @router.post("/api/context/build", response_model=ContextBuildResponse)
