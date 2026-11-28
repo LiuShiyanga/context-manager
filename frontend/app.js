@@ -12,14 +12,17 @@ const messageBox = document.querySelector('#messages');
 const button = document.querySelector('#build-button');
 const errorBox = document.querySelector('#error');
 
+// 将多行记忆字段规范化为去空白、去空项的字符串数组。
 function lines(selector) {
   return document.querySelector(selector).value.split('\n').map((value) => value.trim()).filter(Boolean);
 }
 
+// 对所有进入 innerHTML 的动态文本转义，防止演示数据形成 DOM 注入。
 function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, (character) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[character]));
 }
 
+// 从当前表单状态构造后端共用的上下文构建请求。
 function buildPayload(originalMessages) {
   return {
     session_id: document.querySelector('#session-id').value.trim() || 'demo-session',
@@ -33,6 +36,7 @@ function buildPayload(originalMessages) {
   };
 }
 
+// 在构建结果上方叠加模型回答和两次 provider 调用的 usage 信息。
 function renderAnswer(result, originalMessages) {
   renderResults(result.context, originalMessages);
   const usage = result.usage;
@@ -43,6 +47,7 @@ function renderAnswer(result, originalMessages) {
     <p><small>模型 ${escapeHtml(usage.model)} · ${usage.estimated ? '估算 usage' : 'Provider 报告实际 usage'}${summaryUsage ? ` · 摘要调用 ${summaryUsage.input_tokens}/${summaryUsage.output_tokens} tokens` : ' · 未发摘要请求'}</small></p></section>`);
 }
 
+// 将选择结果、预算分区、摘要来源和 artifact 引用渲染为可审计对照视图。
 function renderResults(result, originalMessages) {
   const originalById = new Map(originalMessages.map((message) => [message.id, message]));
   const omitted = result.omitted_message_ids.map((id) => originalById.get(id)).filter(Boolean);
@@ -59,6 +64,7 @@ function renderResults(result, originalMessages) {
     <section><h3>构建后实际保留上下文 <small>${kept.length} 条</small></h3><div class="result-messages">${kept.map(messageHtml).join('') || '<p>没有保留消息。</p>'}</div></section>
     <details class="omitted-details"><summary>被省略的原始消息（${omitted.length} 条）</summary><div class="result-messages">${omitted.map(messageHtml).join('') || '<p>没有省略消息。</p>'}</div></details>
     ${artifactsHtml}`;
+  // artifact 正文按需获取，初始结果只展示稳定引用和预览。
   document.querySelectorAll('.artifact-link').forEach((artifactButton) => artifactButton.addEventListener('click', async () => {
     const container = document.querySelector('.artifact-result');
     container.textContent = '读取中…';
@@ -71,6 +77,7 @@ function renderResults(result, originalMessages) {
   }));
 }
 
+// 装载一组短样例，便于立即观察最近消息和工具截断行为。
 document.querySelector('#load-sample').addEventListener('click', () => {
   messageBox.value = JSON.stringify(sampleMessages, null, 2);
   document.querySelector('#session-id').value = 'demo-session';
@@ -81,6 +88,7 @@ document.querySelector('#load-sample').addEventListener('click', () => {
   document.querySelector('#tool-conclusions').value = 'Synthetic fixture only; not production data';
 });
 
+// 从后端读取固定长会话 fixture，保证多人演示时输入完全一致。
 document.querySelector('#load-fixture').addEventListener('click', async () => {
   errorBox.hidden = true;
   try {
@@ -101,20 +109,24 @@ document.querySelector('#load-fixture').addEventListener('click', async () => {
   }
 });
 
+// 同步预算滑杆的数值标签。
 document.querySelector('#input-budget').addEventListener('input', (event) => {
   document.querySelector('#budget-value').textContent = event.target.value;
 });
 
+// 切换到较小预算并回填建议值，形成可重复的压缩前后对照。
 document.querySelector('#budget-demo').addEventListener('click', () => {
   const budget = document.querySelector('#input-budget');
   budget.value = Number(budget.value) > 5000 ? 4000 : 8000;
   budget.dispatchEvent(new Event('input'));
 });
 
+// 仅在用户主动开启时显示调试场景选择和触发控件。
 document.querySelector('#debug-enabled').addEventListener('change', (event) => {
   document.querySelector('#debug-trigger').disabled = !event.target.checked;
 });
 
+// 调用受控调试端点，以验证结构化错误而不暴露内部堆栈。
 document.querySelector('#debug-trigger').addEventListener('click', async () => {
   errorBox.hidden = true;
   const scenario = document.querySelector('#debug-scenario').value;
@@ -131,6 +143,7 @@ document.querySelector('#debug-trigger').addEventListener('click', async () => {
   }
 });
 
+// 提交表单前锁定按钮，并统一处理构建接口的成功与安全错误响应。
 button.addEventListener('click', async () => {
   errorBox.hidden = true;
   button.disabled = true;
@@ -155,6 +168,7 @@ button.addEventListener('click', async () => {
   }
 });
 
+// 运行固定评估集并展示阈值是否通过及压缩收益。
 document.querySelector('#evaluation-button').addEventListener('click', async () => {
   const panel = document.querySelector('#evaluation-results');
   panel.hidden = false;
@@ -169,6 +183,7 @@ document.querySelector('#evaluation-button').addEventListener('click', async () 
   }
 });
 
+// 强制压缩并请求 provider 回答，复用同一审计视图展示最终上下文。
 document.querySelector('#answer-button').addEventListener('click', async (event) => {
   const answerButton = event.currentTarget;
   errorBox.hidden = true;
@@ -194,6 +209,7 @@ document.querySelector('#answer-button').addEventListener('click', async (event)
   }
 });
 
+// 启动时探测 provider 与 usage 类型，并在状态条中明确展示。
 fetch('/health').then((response) => response.json()).then((health) => {
   document.querySelector('.status').innerHTML = `<span class="dot"></span>${escapeHtml(health.provider)} · ${health.estimated_usage ? '估算 usage' : '实际 usage'}`;
 }).catch(() => {});

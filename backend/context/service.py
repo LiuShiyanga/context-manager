@@ -1,3 +1,5 @@
+"""编排 provider 摘要生成与确定性预算构建，隔离网络调用和选择策略。"""
+
 from __future__ import annotations
 
 import json
@@ -8,6 +10,8 @@ from backend.context.providers import ContextProvider, ProviderResult
 
 
 def provider_summary_message(result: ProviderResult, fallback_source_ids: list[str]) -> Message:
+    """校验 provider 的结构化摘要，并转换为带来源 ID 的领域消息。"""
+
     raw = result.text.strip()
     if raw.startswith("```"):
         lines = raw.splitlines()
@@ -41,6 +45,8 @@ def compress_and_build(
     recent_message_count: int,
     tool_result_char_limit: int,
 ) -> tuple[object, Message | None, ProviderResult | None]:
+    """按需压缩非近期历史，再把摘要交给纯本地构建器完成预算选择。"""
+
     summary_message = None
     summary_usage = None
     should_compress = force_compress or len(conversation.messages) > recent_message_count

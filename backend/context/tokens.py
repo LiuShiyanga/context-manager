@@ -10,7 +10,10 @@ class TokenCounter(Protocol):
 
     estimated: bool
 
-    def count_text(self, text: str) -> int: ...
+    def count_text(self, text: str) -> int:
+        """返回给定文本的 token 数；具体精度由实现决定。"""
+
+        ...
 
 
 class ApproximateTokenCounter:
