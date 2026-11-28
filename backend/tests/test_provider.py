@@ -1,3 +1,5 @@
+"""验证离线 Mock 输出、结构化摘要和 usage 记录的隐私约束。"""
+
 from pathlib import Path
 
 from backend.context.models import Message
@@ -6,6 +8,8 @@ from backend.context.usage import UsageRecorder
 
 
 def test_mock_provider_returns_stable_text_and_estimated_usage():
+    """确认相同问题产生稳定答案和估算用量，记录中不泄漏消息正文。"""
+
     provider = MockProvider()
     messages = [Message(id="m1", role="user", content="secret prompt body")]
 
@@ -21,6 +25,8 @@ def test_mock_provider_returns_stable_text_and_estimated_usage():
 
 
 def test_mock_summary_preserves_structured_memory_fields():
+    """确认摘要包含目标、约束、决定、待办和工具结论五类结构化记忆。"""
+
     result = MockProvider().summarize(
         [], objective="ship demo", constraints=["offline"], decisions=["use mock"], todos=["test"],
         tool_conclusions=["fixture only"],
@@ -34,6 +40,8 @@ def test_mock_summary_preserves_structured_memory_fields():
 
 
 def test_usage_recorder_writes_metadata_without_prompt_content(tmp_path: Path):
+    """确认落盘记录包含 provider 元数据，但不包含输入消息中的私密正文。"""
+
     path = tmp_path / "usage.jsonl"
     result = MockProvider().answer([Message(id="m1", role="user", content="unique-secret-text")], "question")
     UsageRecorder(path).record(result)

@@ -1,3 +1,5 @@
+"""验证构建器的防御性校验、服务端 ID、来源追踪和可替换计数器。"""
+
 import pytest
 
 from backend.context.builder import BudgetUnsatisfiableError, build_context
@@ -6,6 +8,8 @@ from backend.context.tokens import ApproximateTokenCounter
 
 
 def test_duplicate_message_ids_are_rejected():
+    """确认重复消息 ID 在进入选择流程之前被拒绝。"""
+
     conversation = Conversation(messages=[
         Message(id="same", role="user", content="first"),
         Message(id="same", role="assistant", content="second"),
@@ -16,6 +20,8 @@ def test_duplicate_message_ids_are_rejected():
 
 
 def test_caller_artifact_id_is_replaced_with_deterministic_server_id():
+    """确认长工具结果不沿用调用方控制的 ID，而使用服务端稳定标识。"""
+
     conversation = Conversation(session_id="s", messages=[
         Message(id="tool-1", role="tool", content="private full result " * 10, artifact_id="artifact-caller-controlled"),
         Message(id="user-1", role="user", content="summarize"),
@@ -32,6 +38,8 @@ def test_caller_artifact_id_is_replaced_with_deterministic_server_id():
 
 
 def test_summary_sources_track_omitted_messages_and_system_is_never_omitted():
+    """确认摘要来源仅关联省略历史，system 消息始终保持原样。"""
+
     conversation = Conversation(
         messages=[
             Message(id="sys", role="system", content="policy"),
@@ -52,6 +60,8 @@ def test_summary_sources_track_omitted_messages_and_system_is_never_omitted():
 
 
 def test_counter_is_injected_and_estimation_metadata_is_preserved():
+    """确认注入的计数规则决定预算成本，并保留其精确或估算标记。"""
+
     class ExactTestCounter(ApproximateTokenCounter):
         estimated = False
 
@@ -69,6 +79,8 @@ def test_counter_is_injected_and_estimation_metadata_is_preserved():
 
 
 def test_too_small_budget_lists_hard_required_message_ids():
+    """确认预算异常携带所有硬保留消息 ID，便于调用方诊断。"""
+
     with pytest.raises(BudgetUnsatisfiableError) as error:
         build_context(
             Conversation(messages=[Message(id="s", role="system", content="system"), Message(id="u", role="user", content="goal")]),

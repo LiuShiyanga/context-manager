@@ -1,3 +1,5 @@
+"""定义 API 请求/响应模型、领域转换函数和本地 artifact 存储。"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -8,6 +10,8 @@ from backend.context.models import Conversation, Message, TokenBudget
 
 
 class MessageRequest(BaseModel):
+    """API 层的消息结构，与领域消息保持字段兼容。"""
+
     id: str
     role: str
     content: str
@@ -18,6 +22,8 @@ class MessageRequest(BaseModel):
     @field_validator("role")
     @classmethod
     def validate_role(cls, value: str) -> str:
+        """只接受上下文构建器能够识别的消息角色。"""
+
         if value not in {"system", "user", "assistant", "tool", "summary"}:
             raise ValueError("Unsupported message role")
         return value
@@ -25,12 +31,16 @@ class MessageRequest(BaseModel):
     @field_validator("id")
     @classmethod
     def validate_id(cls, value: str) -> str:
+        """拒绝空白消息 ID，确保后续选择与来源追踪可靠。"""
+
         if not value.strip():
             raise ValueError("Message id cannot be empty")
         return value
 
 
 class ContextBuildRequest(BaseModel):
+    """描述一次上下文构建所需的消息、预算和结构化记忆。"""
+
     session_id: str = "demo-session"
     messages: list[MessageRequest]
     budget: dict[str, int]
@@ -45,6 +55,8 @@ class ContextBuildRequest(BaseModel):
     @field_validator("messages")
     @classmethod
     def validate_unique_message_ids(cls, value: list[MessageRequest]) -> list[MessageRequest]:
+        """在进入领域层前拒绝会造成选择歧义的重复消息 ID。"""
+
         ids = [message.id for message in value]
         if len(ids) != len(set(ids)):
             raise ValueError("Message IDs must be unique within a conversation")
@@ -53,6 +65,8 @@ class ContextBuildRequest(BaseModel):
     @field_validator("budget")
     @classmethod
     def validate_budget(cls, value: dict[str, int]) -> dict[str, int]:
+        """限制预算字段集合，并确保输入、输出预算均为非负数。"""
+
         if set(value) - {"input_tokens", "output_tokens"}:
             raise ValueError("Budget only accepts input_tokens and output_tokens")
         if value.get("input_tokens", 0) < 0 or value.get("output_tokens", 0) < 0:
@@ -61,6 +75,8 @@ class ContextBuildRequest(BaseModel):
 
 
 class ContextBuildResponse(BaseModel):
+    """向前端返回所选消息、预算分区和可回读 artifact 标识。"""
+
     session_id: str
     messages: list[MessageRequest]
     input_tokens: int
@@ -72,6 +88,8 @@ class ContextBuildResponse(BaseModel):
 
 
 def to_conversation(request: ContextBuildRequest) -> Conversation:
+    """把已校验的 API 请求转换为不依赖 Pydantic 的领域会话。"""
+
     return Conversation(
         session_id=request.session_id,
         messages=[Message(**message.model_dump()) for message in request.messages],
@@ -84,6 +102,8 @@ def to_conversation(request: ContextBuildRequest) -> Conversation:
 
 
 def to_budget(request: ContextBuildRequest) -> TokenBudget:
+    """从字典形式的 API 字段构造强类型 token 预算。"""
+
     return TokenBudget(
         input_tokens=request.budget.get("input_tokens", 0),
         output_tokens=request.budget.get("output_tokens", 0),
@@ -91,14 +111,22 @@ def to_budget(request: ContextBuildRequest) -> TokenBudget:
 
 
 class ArtifactStore:
+    """使用受限 artifact ID 在指定目录内幂等保存完整工具正文。"""
+
     def __init__(self, root: Path):
+        """固定并创建存储根目录，后续路径都必须位于该目录之下。"""
+
         self.root = root.resolve()
         self.root.mkdir(parents=True, exist_ok=True)
 
     def put(self, artifact_id: str, content: str) -> None:
+        """保存正文；同 ID 同内容视为幂等，不同内容则判定为碰撞。"""
+
+        # ID 只允许固定前缀和字母数字后缀，先从语法上排除路径片段。
         if not artifact_id.startswith("artifact-") or not artifact_id[9:].isalnum():
             raise ValueError("Invalid artifact id")
         path = (self.root / f"{artifact_id}.txt").resolve()
+        # 解析后的路径仍需位于根目录下，以防未来 ID 规则变化引入路径逃逸。
         if self.root not in path.parents:
             raise ValueError("Artifact path escaped store")
         if path.exists():
@@ -108,6 +136,8 @@ class ArtifactStore:
         path.write_text(content, encoding="utf-8")
 
     def get(self, artifact_id: str) -> str | None:
+        """安全读取 artifact；格式非法、路径越界或文件不存在时统一返回 ``None``。"""
+
         if not artifact_id.startswith("artifact-") or not artifact_id[9:].isalnum():
             return None
         path = (self.root / f"{artifact_id}.txt").resolve()

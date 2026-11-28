@@ -1,3 +1,4 @@
+// 页面启动时加载的短会话样本，用于快速演示上下文构建流程。
 const sampleMessages = [
   {id: 'system-1', role: 'system', content: 'You are a careful engineering assistant. Preserve user goals, decisions, and active constraints.'},
   {id: 'user-1', role: 'user', content: 'Help me investigate why background jobs occasionally retry after completing.'},
@@ -10,39 +11,48 @@ const sampleMessages = [
   {id: 'assistant-4', role: 'assistant', content: 'Stop processing safely, retain the persisted state, and let the retry policy handle recovery.'},
 ];
 
+// 缓存频繁使用的页面节点，避免每次交互都重复查询 DOM。
 const messageBox = document.querySelector('#messages');
 const errorBox = document.querySelector('#error');
 const button = document.querySelector('#build-button');
 const results = document.querySelector('#results');
 
+// 将“每行一项”的文本域规范化为去空白、去空行的字符串数组。
 function lines(selector) {
   return document.querySelector(selector).value.split('\n').map((value) => value.trim()).filter(Boolean);
 }
 
+// 把构建响应转换为预算分区、消息卡片和 artifact 入口。
 function renderResult(data) {
   const messages = data.messages.map((message) => {
     const sourceInfo = message.source_ids?.length ? `<small>来源: ${message.source_ids.join(', ')}</small>` : '';
     const artifact = message.artifact_id ? `<button class="text-button" data-artifact="${message.artifact_id}">查看完整工具结果</button>` : '';
+    // 消息正文必须先转义，防止会话内容被浏览器解释为 HTML。
     return `<article class="message-card"><div><strong>${message.role}</strong><span>${message.id}</span></div><p>${escapeHtml(message.content)}</p>${sourceInfo}${artifact}</article>`;
   }).join('');
   const partitions = Object.entries(data.partitions).map(([key, value]) => `<li><span>${key}</span><strong>${value}</strong></li>`).join('');
   results.innerHTML = `<section class="panel result-panel"><p class="eyebrow">BUILT CONTEXT</p><h2>${data.input_tokens} / ${document.querySelector('#input-budget').value} tokens</h2><p>${data.estimated ? '离线估算值' : '精确计数'}</p><h3>预算分区</h3><ul class="partition-list">${partitions}</ul><h3>保留消息</h3>${messages}<h3>省略消息 (${data.omitted_message_ids.length})</h3><p>${data.omitted_message_ids.join(', ') || '无'}</p><h3>可取回 Artifacts (${data.artifacts.length})</h3><ul>${data.artifacts.map((id) => `<li><button class="text-button" data-artifact="${id}">${id}</button></li>`).join('')}</ul><pre id="artifact-content" hidden></pre></section>`;
+  // 结果区是动态创建的，因此在每次渲染后为 artifact 按钮重新绑定事件。
   results.querySelectorAll('[data-artifact]').forEach((element) => element.addEventListener('click', () => readArtifact(element.dataset.artifact)));
 }
 
+// 转义五种具有 HTML 语义的字符，供 innerHTML 模板安全展示外部文本。
 function escapeHtml(value) {
   return value.replace(/[&<>"']/g, (character) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[character]));
 }
 
+// 按服务端生成的稳定 ID 读取被外置的完整工具结果。
 async function readArtifact(id) {
   const response = await fetch(`/api/artifacts/${encodeURIComponent(id)}`);
   const body = await response.json();
   const output = document.querySelector('#artifact-content');
   output.hidden = false;
+  // 使用 textContent 展示正文，确保工具输出不会作为 HTML 执行。
   output.textContent = response.ok ? body.content : body.error?.message || '无法读取 artifact';
   output.scrollIntoView({behavior: 'smooth', block: 'nearest'});
 }
 
+// 将内置短样本和对应结构化记忆一次性填入表单。
 document.querySelector('#load-sample').addEventListener('click', () => {
   messageBox.value = JSON.stringify(sampleMessages, null, 2);
   document.querySelector('#session-id').value = 'demo-session';
@@ -53,6 +63,7 @@ document.querySelector('#load-sample').addEventListener('click', () => {
   document.querySelector('#tool-conclusions').value = 'Synthetic fixture only; not production data';
 });
 
+// 从 API 载入指定轮数的版本化合成会话，并同步其元数据字段。
 document.querySelector('#load-fixture').addEventListener('click', async () => {
   errorBox.hidden = true;
   try {
@@ -68,11 +79,13 @@ document.querySelector('#load-fixture').addEventListener('click', async () => {
     document.querySelector('#todos').value = body.todos.join('\n');
     document.querySelector('#tool-conclusions').value = '固定版本合成样本；不得作为真实建议';
   } catch (error) {
+    // 网络错误与 API 业务错误统一显示在表单下方的告警区域。
     errorBox.textContent = error.message;
     errorBox.hidden = false;
   }
 });
 
+// 滑块变化时只更新可见数值，实际预算在构建请求时读取。
 document.querySelector('#input-budget').addEventListener('input', (event) => {
   document.querySelector('#budget-value').textContent = event.target.value;
 });
@@ -103,6 +116,7 @@ document.querySelector('#debug-trigger').addEventListener('click', async () => {
   }
 });
 
+// 收集完整表单并请求上下文构建，同时维护按钮的加载与恢复状态。
 button.addEventListener('click', async () => {
   errorBox.hidden = true;
   button.disabled = true;
@@ -126,14 +140,17 @@ button.addEventListener('click', async () => {
     if (!response.ok) throw new Error(body.error?.message || body.detail?.message || body.detail || '构建失败。');
     renderResult(body);
   } catch (error) {
+    // JSON 解析、请求失败和服务端错误都通过同一个可访问告警节点反馈。
     errorBox.textContent = error.message || '无法连接本地服务，请确认 API 已启动。';
     errorBox.hidden = false;
   } finally {
+    // 无论请求结果如何都恢复按钮，避免页面停留在不可操作状态。
     button.disabled = false;
     button.firstElementChild.textContent = '构建上下文';
   }
 });
 
+// 运行固定 Mock 评测，并在独立面板中展示两条流程的估算 token 对比。
 document.querySelector('#evaluation-button').addEventListener('click', async () => {
   const panel = document.querySelector('#evaluation-results');
   panel.hidden = false;
@@ -148,4 +165,5 @@ document.querySelector('#evaluation-button').addEventListener('click', async () 
   }
 });
 
+// 首次打开页面时自动填充短样本，让工作台处于可立即运行的状态。
 document.querySelector('#load-sample').click();

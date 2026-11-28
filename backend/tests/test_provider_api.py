@@ -1,3 +1,5 @@
+"""验证 provider 端点的模式声明、错误协议与调试场景。"""
+
 from fastapi.testclient import TestClient
 
 from backend.app.main import app
@@ -7,6 +9,8 @@ client = TestClient(app)
 
 
 def test_health_declares_mock_only_mode():
+    """确认健康检查完整声明 Mock 模式，不暗示真实模型调用。"""
+
     response = client.get("/health")
 
     assert response.json() == {
@@ -19,6 +23,8 @@ def test_health_declares_mock_only_mode():
 
 
 def test_mock_answer_route_returns_estimated_usage_without_real_provider():
+    """确认问答端点返回确定性答案及明确标记的 Mock 用量。"""
+
     response = client.post("/api/mock/answer", json={"question": "what next?", "messages": []})
 
     assert response.status_code == 200

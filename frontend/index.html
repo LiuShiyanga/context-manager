@@ -7,19 +7,23 @@
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
+  <!-- 页面采用左侧配置工作区、右侧构建结果的双栏结构。 -->
   <main class="layout">
     <section class="workspace">
+      <!-- 顶部区域展示产品标识和当前离线 Mock 状态。 -->
       <header class="topbar">
         <div class="brand"><span class="brand-mark">C</span><div><strong>Context Manager</strong><small>上下文工作台</small></div></div>
         <div class="status"><span class="dot"></span>Mock 模式 · 本地处理</div>
       </header>
 
+      <!-- 引导区说明工作台用途，不参与表单提交。 -->
       <section class="hero">
         <p class="eyebrow">CONTEXT WORKSPACE</p>
         <h1>让重要上下文<br><span>始终留在对话中。</span></h1>
         <p class="lead">管理对话、压缩历史，并清晰掌控每一段上下文的预算与来源。</p>
       </section>
 
+      <!-- 第一步：选择合成 fixture 或直接编辑会话消息与截断参数。 -->
       <section class="panel conversation-panel">
         <div class="section-heading"><div><span class="step">01</span><h2>会话内容</h2></div><button id="load-sample" class="text-button">载入示例</button></div>
         <div class="field-grid">
@@ -36,6 +40,7 @@
         </div>
       </section>
 
+      <!-- 第二步：录入可用于生成历史摘要的结构化会话记忆。 -->
       <section class="panel metadata-panel">
         <div class="section-heading"><div><span class="step">02</span><h2>结构化记忆</h2></div><span class="optional">可选</span></div>
         <div class="field-grid memory-grid">
@@ -47,6 +52,7 @@
         </div>
       </section>
 
+      <!-- 第三步：调整输入预算，触发上下文构建或固定 Mock 评测。 -->
       <section class="panel budget-panel">
         <div class="section-heading"><div><span class="step">03</span><h2>Token 预算</h2></div><span class="estimate-note">离线近似估算 · 每 3 字符约 1 token</span></div>
         <label class="budget-control">输入上限 <strong><span id="budget-value">8000</span> tokens</strong><input id="input-budget" type="range" min="100" max="10000" step="100" value="8000"></label>
@@ -61,10 +67,12 @@
       <footer>本地演示 · 内容只用于当前构建请求</footer>
     </section>
 
+    <!-- 结果侧栏由 JavaScript 替换内容，并通过 aria-live 播报更新。 -->
     <aside class="results" id="results" aria-live="polite">
       <div class="empty-state"><div class="empty-icon">⌘</div><p class="eyebrow">YOUR CONTEXT</p><h2>等待构建</h2><p>配置会话和预算后，构建结果会显示在这里。</p><div class="empty-lines"><i></i><i></i><i></i></div></div>
     </aside>
   </main>
+  <!-- 原生脚本负责样本载入、API 调用和结果渲染，无需前端构建步骤。 -->
   <script src="/app.js"></script>
 </body>
 </html>

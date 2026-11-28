@@ -1,3 +1,5 @@
+"""定义演示应用的 API 路由，并连接领域逻辑、fixture 与本地存储。"""
+
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
@@ -12,6 +14,7 @@ from backend.data.store import FIXTURES
 from backend.evaluation import run_evaluation
 
 router = APIRouter()
+# 进程级对象分别持久化完整工具结果、提供确定性输出并记录无正文 usage 元数据。
 ARTIFACT_STORE = ArtifactStore(Path(__file__).resolve().parents[2] / "artifacts" / "runtime" / "store")
 PROVIDER = MockProvider()
 USAGE_RECORDER = UsageRecorder(Path(__file__).resolve().parents[2] / "artifacts" / "runtime" / "usage.jsonl")
@@ -34,11 +37,15 @@ class DebugRequest(BaseModel):
 
 
 def _error(code: str, message: str, **details):
+    """构造所有业务端点共用的错误响应结构。"""
+
     return {"error": {"code": code, "message": message, **details}}
 
 
 @router.get("/health")
 def health():
+    """报告服务状态、provider 模式及用量是否为估算值。"""
+
     return {"status": "ok", "provider": PROVIDER.provider_name, "mode": "mock", "estimated_usage": True, "debug_enabled": DEBUG_ENABLED}
 
 
@@ -63,6 +70,8 @@ def trigger_debug(request: DebugRequest):
 
 @router.post("/api/mock/answer")
 def mock_answer(payload: dict):
+    """生成确定性答案，并把不含消息正文的调用元数据落盘。"""
+
     question = str(payload.get("question", ""))
     if not isinstance(payload.get("messages", []), list):
         raise HTTPException(status_code=422, detail=_error("invalid_request", "messages must be a list.")["error"])
@@ -77,6 +86,8 @@ def mock_answer(payload: dict):
 
 @router.post("/api/mock/summarize")
 def mock_summarize(payload: dict):
+    """用结构化记忆生成确定性摘要，并记录估算 usage。"""
+
     try:
         messages = [Message(**message) for message in payload.get("messages", [])]
         result = PROVIDER.summarize(
@@ -97,6 +108,8 @@ def mock_summarize(payload: dict):
 
 @router.get("/api/sessions/synthetic-garden-80")
 def read_synthetic_session(turns: int = 80):
+    """返回指定轮数的合成会话，并把越界参数转换成业务错误。"""
+
     try:
         session = FIXTURES.session_slice(turns)
     except ValueError as error:
@@ -106,11 +119,15 @@ def read_synthetic_session(turns: int = 80):
 
 @router.get("/api/evaluations/questions")
 def read_evaluation_questions():
+    """返回版本化的固定合成评测问题集。"""
+
     return FIXTURES.questions
 
 
 @router.get("/api/evaluations/run")
 def get_mock_evaluation(input_budget: int = 4096):
+    """运行离线确定性流程比较，不发起任何真实 provider 请求。"""
+
     if input_budget < 1:
         raise HTTPException(status_code=422, detail=_error("invalid_budget", "input_budget must be positive.")["error"])
     return run_evaluation(input_budget)
@@ -118,6 +135,8 @@ def get_mock_evaluation(input_budget: int = 4096):
 
 @router.post("/api/context/build", response_model=ContextBuildResponse)
 def build(request: ContextBuildRequest):
+    """按预算构建上下文，并将外置工具正文保存到本地 artifact store。"""
+
     try:
         result = build_context(
             to_conversation(request),
@@ -152,6 +171,8 @@ def build(request: ContextBuildRequest):
 
 @router.get("/api/artifacts/{artifact_id}")
 def read_artifact(artifact_id: str):
+    """按服务端生成的 ID 读取完整工具结果，不存在或格式非法时返回 404。"""
+
     content = ARTIFACT_STORE.get(artifact_id)
     if content is None:
         raise HTTPException(status_code=404, detail=_error("artifact_not_found", "Artifact was not found.")["error"])
