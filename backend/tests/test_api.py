@@ -46,7 +46,7 @@ def test_build_endpoint_returns_partitioned_context_and_retrievable_artifact(cli
     body = response.json()
     assert body["input_tokens"] <= 800
     assert body["partitions"]["system"] == 0
-    assert body["partitions"]["summary"] > 0
+    assert body["partitions"]["memory"] > 0
     tool_message = next(message for message in body["messages"] if message["role"] == "tool")
     assert tool_message["artifact_id"]
     artifact = client.get(f"/api/artifacts/{tool_message['artifact_id']}")

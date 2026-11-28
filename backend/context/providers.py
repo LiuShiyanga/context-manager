@@ -1,10 +1,9 @@
-"""定义上下文 provider 契约及可重复运行的离线 Mock 实现。"""
-
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import os
 from time import perf_counter
-from typing import Protocol
+from typing import Any, Protocol
 
 from backend.context.models import Message
 from backend.context.tokens import DEFAULT_TOKEN_COUNTER
@@ -12,8 +11,6 @@ from backend.context.tokens import DEFAULT_TOKEN_COUNTER
 
 @dataclass(frozen=True)
 class ProviderResult:
-    """统一承载 provider 输出、用量估算与调用状态。"""
-
     text: str
     provider: str
     model: str
@@ -24,27 +21,103 @@ class ProviderResult:
     status: str = "ok"
 
     def to_record(self) -> dict:
-        """转换为适合序列化和 usage 记录的普通字典。"""
-
         return asdict(self)
 
 
 class ContextProvider(Protocol):
-    """上下文摘要和问答 provider 必须实现的最小接口。"""
-
     provider_name: str
     model_name: str
     estimated: bool
 
     def summarize(self, messages: list[Message], *, objective: str = "", constraints: list[str] | None = None,
                   decisions: list[str] | None = None, todos: list[str] | None = None,
-                  tool_conclusions: list[str] | None = None) -> ProviderResult: ...
+                  tool_conclusions: list[str] | None = None, max_tokens: int = 512) -> ProviderResult: ...
 
-    def answer(self, messages: list[Message], question: str) -> ProviderResult: ...
+    def answer(self, messages: list[Message], question: str, *, max_tokens: int = 512) -> ProviderResult: ...
+
+
+class AnthropicProvider:
+    """Official Anthropic SDK adapter; prompt and response content never enters telemetry."""
+
+    provider_name = "anthropic"
+    estimated = False
+
+    def __init__(self, api_key: str | None = None, model_name: str | None = None,
+                 client: Any | None = None, timeout: float = 30):
+        self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY", "")
+        self.model_name = model_name or os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-5-20250929")
+        if client is None:
+            if not self.api_key:
+                raise ValueError("ANTHROPIC_API_KEY is required for the Anthropic provider.")
+            from anthropic import Anthropic
+            client = Anthropic(api_key=self.api_key, timeout=timeout)
+        self.client = client
+
+    @staticmethod
+    def _payload(messages: list[Message]) -> tuple[str, list[dict[str, str]]]:
+        system_parts: list[str] = []
+        payload: list[dict[str, str]] = []
+        for message in messages:
+            if message.role == "system":
+                system_parts.append(message.content)
+                continue
+            role = "assistant" if message.role == "assistant" else "user"
+            content = message.content
+            if message.role in {"tool", "summary"}:
+                content = f"[{message.role}{': ' + message.tool_name if message.tool_name else ''}] {content}"
+            if payload and payload[-1]["role"] == role:
+                payload[-1]["content"] += "\n\n" + content
+            else:
+                payload.append({"role": role, "content": content})
+        return "\n\n".join(system_parts), payload
+
+    def _create(self, *, system: str, messages: list[dict[str, str]], max_tokens: int) -> ProviderResult:
+        started = perf_counter()
+        kwargs: dict[str, Any] = {"model": self.model_name, "max_tokens": max_tokens, "messages": messages}
+        if system:
+            kwargs["system"] = system
+        try:
+            response = self.client.messages.create(**kwargs)
+            text = "".join(block.text for block in response.content if getattr(block, "type", None) == "text")
+            return ProviderResult(
+                text=text,
+                provider=self.provider_name,
+                model=response.model,
+                input_tokens=int(response.usage.input_tokens),
+                output_tokens=int(response.usage.output_tokens),
+                estimated=False,
+                duration_ms=round((perf_counter() - started) * 1000, 3),
+            )
+        except Exception as error:
+            raise RuntimeError(f"Anthropic request failed ({type(error).__name__}).") from None
+
+    def answer(self, messages: list[Message], question: str, *, max_tokens: int = 512) -> ProviderResult:
+        system, payload = self._payload(messages)
+        payload.append({"role": "user", "content": question})
+        return self._create(system=system, messages=payload, max_tokens=max_tokens)
+
+    def summarize(self, messages: list[Message], *, objective: str = "", constraints: list[str] | None = None,
+                  decisions: list[str] | None = None, todos: list[str] | None = None,
+                  tool_conclusions: list[str] | None = None, max_tokens: int = 512) -> ProviderResult:
+        notes = {
+            "objective": objective,
+            "constraints": constraints or [],
+            "decisions": decisions or [],
+            "todos": todos or [],
+            "tool_conclusions": tool_conclusions or [],
+        }
+        source = "\n".join(f"[id={message.id} role={message.role}] {message.content}" for message in messages)
+        prompt = f"Structured notes supplied by the application: {notes}\n\nConversation to compress:\n{source}"
+        system = (
+            "Return only one valid JSON object with keys objective, constraints, decisions, todos, "
+            "tool_conclusions, source_ids, and covered_range. Preserve confirmed facts and unresolved work; "
+            "source_ids must contain the exact message IDs supporting the summary. Do not invent facts."
+        )
+        return self._create(system=system, messages=[{"role": "user", "content": prompt}], max_tokens=max_tokens)
 
 
 class MockProvider:
-    """确定性的离线 provider；输出仅用于验证流程，不代表模型质量。"""
+    """Deterministic offline provider; output is workflow evidence, not model-quality evidence."""
 
     provider_name = "mock"
     model_name = "deterministic-v1"
@@ -52,8 +125,6 @@ class MockProvider:
 
     @staticmethod
     def _usage(prompt: str, response: str, started: float) -> ProviderResult:
-        """为确定性结果生成统一的离线用量与耗时记录。"""
-
         return ProviderResult(
             text=response,
             provider="mock",
@@ -66,30 +137,21 @@ class MockProvider:
 
     def summarize(self, messages: list[Message], *, objective: str = "", constraints: list[str] | None = None,
                   decisions: list[str] | None = None, todos: list[str] | None = None,
-                  tool_conclusions: list[str] | None = None) -> ProviderResult:
-        """优先拼接结构化记忆；缺少记忆时使用消息片段形成固定摘要。"""
-
+                  tool_conclusions: list[str] | None = None, max_tokens: int = 512) -> ProviderResult:
         started = perf_counter()
-        # 固定的分区顺序确保相同输入始终产生相同摘要文本。
         sections = [
-            ("Objective", [objective] if objective else []),
-            ("Constraints", constraints or []),
-            ("Decisions", decisions or []),
-            ("Todos", todos or []),
+            ("Objective", [objective] if objective else []), ("Constraints", constraints or []),
+            ("Decisions", decisions or []), ("Todos", todos or []),
             ("Tool conclusions", tool_conclusions or []),
         ]
         content = "\n".join(f"{title}: {'; '.join(values)}" for title, values in sections if values)
         if not content:
             content = "\n".join(f"{message.role}: {message.content[:180]}" for message in messages)
-        # 遥测内容不包含提示词或结果正文，只记录数量和长度。
-        prompt = f"messages={len(messages)}; objective_chars={len(objective)}; metadata_items={sum(len(v or []) for _, v in sections)}"
+        prompt = f"messages={len(messages)}; objective_chars={len(objective)}"
         return self._usage(prompt, content, started)
 
-    def answer(self, messages: list[Message], question: str) -> ProviderResult:
-        """返回包含问题文本的固定格式答案，用于离线评测链路。"""
-
+    def answer(self, messages: list[Message], question: str, *, max_tokens: int = 512) -> ProviderResult:
         started = perf_counter()
         answer = f"Mock answer for: {question.strip()}" if question.strip() else "Mock answer: no question provided."
-        # 同样只用消息数量和问题长度估算输入，避免 usage 记录泄漏正文。
         prompt = f"messages={len(messages)}; question_chars={len(question)}"
         return self._usage(prompt, answer, started)

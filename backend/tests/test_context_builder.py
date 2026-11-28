@@ -65,13 +65,13 @@ def test_builds_traceable_structured_summary_for_omitted_history():
 
     result = build_context(conversation, TokenBudget(input_tokens=120, output_tokens=20), recent_message_count=1)
 
-    summary = next(message for message in result.messages if message.role == "summary")
+    summary = next(message for message in result.messages if message.id == "memory-required")
     assert "Migrate the service." in summary.content
     assert "Keep the API backward compatible." in summary.content
     assert "Update deployment docs." in summary.content
     assert "Tests passed after migration." in summary.content
     assert set(summary.source_ids) == {"u-old", "a-old", "tool-old"}
-    assert result.partitions["summary"] > 0
+    assert result.partitions["memory"] > 0
 
 
 def test_artifact_reference_is_stable_for_same_conversation():

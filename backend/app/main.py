@@ -2,12 +2,16 @@
 
 from pathlib import Path
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.app.routes import router
+
+# 仅从仓库根目录加载本地配置；默认不覆盖调用进程已设置的环境变量。
+load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=False)
 
 # 业务 API 先注册，根路径静态挂载负责提供前端资源和 HTML 回退。
 app = FastAPI(title="Context Manager Demo")

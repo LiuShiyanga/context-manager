@@ -13,7 +13,7 @@
       <!-- 顶部区域展示产品标识和当前离线 Mock 状态。 -->
       <header class="topbar">
         <div class="brand"><span class="brand-mark">C</span><div><strong>Context Manager</strong><small>上下文工作台</small></div></div>
-        <div class="status"><span class="dot"></span>Mock 模式 · 本地处理</div>
+        <div class="status"><span class="dot"></span>本地策略 · 未调用模型</div>
       </header>
 
       <!-- 引导区说明工作台用途，不参与表单提交。 -->
@@ -30,6 +30,7 @@
           <label>固定合成会话轮次<select id="fixture-turns"><option value="10">10 轮</option><option value="40">40 轮</option><option value="80" selected>80 轮</option></select></label>
           <button id="load-fixture" class="text-button">载入固定会话</button>
         </div>
+        <p class="estimate-note">以下是原始输入。构建结果会展示实际保留与省略的消息及预算分区；不调用模型。</p>
         <label class="field-label" for="messages">消息 JSON</label>
         <textarea id="messages" spellcheck="false" aria-label="会话消息 JSON"></textarea>
         <div id="artifact-content" class="artifact-preview" hidden></div>
@@ -58,6 +59,12 @@
         <label class="budget-control">输入上限 <strong><span id="budget-value">8000</span> tokens</strong><input id="input-budget" type="range" min="100" max="10000" step="100" value="8000"></label>
         <button id="budget-demo" class="text-button">演示 8k → 4k</button>
         <button id="build-button" class="primary-button"><span>构建上下文</span><span aria-hidden="true">→</span></button>
+        <div class="answer-controls">
+          <label>向模型提问<textarea id="question" class="short-area">请基于保留的上下文说明当前目标、关键约束和下一步。</textarea></label>
+          <label><input id="force-compress" type="checkbox" checked> 强制压缩较早历史</label>
+          <button id="answer-button" class="primary-button"><span>压缩并回答</span><span aria-hidden="true">↗</span></button>
+          <p class="estimate-note">Provider 由后端环境变量控制；只有 Anthropic 模式会产生真实请求。构建估算与 Provider 实际 usage 分开展示。</p>
+        </div>
         <button id="evaluation-button" class="text-button">运行固定 Mock 评测</button>
         <section class="panel debug-panel"><h3>本地调试（仅 mock；默认关闭）</h3><label><input id="debug-enabled" type="checkbox"> 启用模拟异常</label><select id="debug-scenario"><option value="budget_unsatisfiable">必需消息超出预算</option><option value="summary_failure">摘要 provider 失败</option><option value="artifact_missing">Artifact 缺失</option></select><button id="debug-trigger" class="text-button" disabled>触发模拟异常</button><p>异常仅用于验证错误展示，不会删除或改写会话内容。</p></section>
         <section id="evaluation-results" class="evaluation-results" hidden></section>
@@ -69,7 +76,7 @@
 
     <!-- 结果侧栏由 JavaScript 替换内容，并通过 aria-live 播报更新。 -->
     <aside class="results" id="results" aria-live="polite">
-      <div class="empty-state"><div class="empty-icon">⌘</div><p class="eyebrow">YOUR CONTEXT</p><h2>等待构建</h2><p>配置会话和预算后，构建结果会显示在这里。</p><div class="empty-lines"><i></i><i></i><i></i></div></div>
+      <div class="empty-state"><div class="empty-icon">⌘</div><p class="eyebrow">CONTEXT BUILD</p><h2>等待构建</h2><p>这里会根据你当前的原始会话和预算，展示后端实际构建的上下文；这是本地策略结果，不是模型生成结果。</p><div class="empty-lines"><i></i><i></i><i></i></div></div>
     </aside>
   </main>
   <!-- 原生脚本负责样本载入、API 调用和结果渲染，无需前端构建步骤。 -->

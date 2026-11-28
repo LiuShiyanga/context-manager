@@ -1,14 +1,16 @@
 """定义演示应用的 API 路由，并连接领域逻辑、fixture 与本地存储。"""
 
 from pathlib import Path
+import os
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, field_validator
 
-from backend.app.schemas import ArtifactStore, ContextBuildRequest, ContextBuildResponse, MessageRequest, to_budget, to_conversation
+from backend.app.schemas import ArtifactStore, ContextAnswerRequest, ContextBuildRequest, ContextBuildResponse, MessageRequest, to_budget, to_conversation
 from backend.context.builder import BudgetUnsatisfiableError, build_context
 from backend.context.models import Message
-from backend.context.providers import MockProvider
+from backend.context.providers import AnthropicProvider, MockProvider
+from backend.context.service import compress_and_build
 from backend.context.usage import UsageRecorder
 from backend.data.store import FIXTURES
 from backend.evaluation import run_evaluation
@@ -21,8 +23,30 @@ USAGE_RECORDER = UsageRecorder(Path(__file__).resolve().parents[2] / "artifacts"
 DEBUG_ENABLED = False
 
 
+def get_provider():
+    mode = os.getenv("PROVIDER", "mock").lower()
+    if mode == "anthropic":
+        return AnthropicProvider()
+    if mode != "mock":
+        raise ValueError("PROVIDER must be mock or anthropic")
+    return PROVIDER
+
+
 class ProviderError(RuntimeError):
     """Raised when a mock provider failure is simulated for the demo."""
+
+
+class RealAnswerRequest(BaseModel):
+    messages: list[MessageRequest]
+    question: str
+    max_tokens: int = 300
+
+    @field_validator("max_tokens")
+    @classmethod
+    def validate_max_tokens(cls, value: int) -> int:
+        if not 1 <= value <= 512:
+            raise ValueError("max_tokens must be between 1 and 512")
+        return value
 
 
 class DebugRequest(BaseModel):
@@ -44,9 +68,17 @@ def _error(code: str, message: str, **details):
 
 @router.get("/health")
 def health():
-    """报告服务状态、provider 模式及用量是否为估算值。"""
+    """报告服务状态、当前 provider 模式及用量是否为估算值。"""
 
-    return {"status": "ok", "provider": PROVIDER.provider_name, "mode": "mock", "estimated_usage": True, "debug_enabled": DEBUG_ENABLED}
+    mode = os.getenv("PROVIDER", "mock").lower()
+    provider = "anthropic" if mode == "anthropic" else PROVIDER.provider_name
+    return {
+        "status": "ok",
+        "provider": provider,
+        "mode": mode,
+        "estimated_usage": mode != "anthropic",
+        "debug_enabled": DEBUG_ENABLED,
+    }
 
 
 @router.post("/api/debug/trigger")
@@ -167,6 +199,65 @@ def build(request: ContextBuildRequest):
         artifacts=list(result.artifacts),
         estimated=result.estimated,
     )
+
+
+@router.post("/api/context/answer")
+def context_answer(request: ContextAnswerRequest):
+    provider = get_provider()
+    conversation = to_conversation(request)
+    budget = to_budget(request)
+    try:
+        result, summary, summary_usage = compress_and_build(
+            conversation,
+            budget,
+            provider,
+            force_compress=request.force_compress,
+            recent_message_count=request.recent_message_count,
+            tool_result_char_limit=request.tool_result_char_limit,
+        )
+    except BudgetUnsatisfiableError as error:
+        raise HTTPException(
+            status_code=422,
+            detail=_error(
+                "budget_unsatisfiable",
+                "Required context exceeds the input budget; no answer request was sent.",
+                required_tokens=error.required_tokens,
+                required_message_ids=error.required_message_ids,
+                excess_tokens=error.excess_tokens,
+                suggestions=error.suggestions,
+            )["error"],
+        ) from error
+    except (RuntimeError, ValueError) as error:
+        raise HTTPException(status_code=503, detail=_error("provider_error", str(error))["error"]) from error
+
+    for artifact_id, content in result.artifacts.items():
+        ARTIFACT_STORE.put(artifact_id, content)
+    try:
+        answer = provider.answer(result.messages, request.question, max_tokens=budget.output_tokens)
+    except RuntimeError as error:
+        raise HTTPException(status_code=503, detail=_error("provider_error", str(error))["error"]) from error
+    if summary_usage:
+        USAGE_RECORDER.record(summary_usage)
+    USAGE_RECORDER.record(answer)
+    return {
+        "session_id": request.session_id,
+        "answer": answer.text,
+        "usage": answer.to_record(),
+        "context": {
+            "messages": [MessageRequest.model_validate(message.__dict__).model_dump() for message in result.messages],
+            "input_tokens": result.input_tokens,
+            "output_tokens": budget.output_tokens,
+            "partitions": result.partitions,
+            "omitted_message_ids": result.omitted_message_ids,
+            "artifacts": list(result.artifacts),
+            "estimated": result.estimated,
+        },
+        "compression": {
+            "performed": summary is not None,
+            "summary": MessageRequest.model_validate(summary.__dict__).model_dump() if summary else None,
+            "usage": summary_usage.to_record() if summary_usage else None,
+        },
+    }
 
 
 @router.get("/api/artifacts/{artifact_id}")
