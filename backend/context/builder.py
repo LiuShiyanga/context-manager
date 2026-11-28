@@ -1,3 +1,5 @@
+"""按硬保留规则和 token 预算构建可审计的模型上下文。"""
+
 from __future__ import annotations
 
 from dataclasses import replace
@@ -8,7 +10,10 @@ from backend.context.tokens import DEFAULT_TOKEN_COUNTER, TokenCounter
 
 
 class BudgetUnsatisfiableError(ValueError):
+    """表示硬保留消息已超过输入预算，附带可供 API 诊断的明细。"""
+
     def __init__(self, required_tokens: int, required_message_ids: list[str], input_budget: int = 0):
+        """记录必需 token、消息 ID、超额量和可执行的调整建议。"""
         self.required_tokens = required_tokens
         self.required_message_ids = required_message_ids
         self.excess_tokens = max(0, required_tokens - input_budget)
@@ -17,11 +22,13 @@ class BudgetUnsatisfiableError(ValueError):
 
 
 def estimate_tokens(text: str) -> int:
-    """Conservative, clearly approximate offline token estimate."""
+    """使用默认离线计数器保守估算文本 token 数。"""
     return DEFAULT_TOKEN_COUNTER.count_text(text)
 
 
 def _message_tokens(message: Message, counter: TokenCounter) -> int:
+    """计算消息正文、角色标签和固定封装开销。"""
+
     return counter.count_text(message.content) + counter.count_text(message.role) + 2
 
 
@@ -34,6 +41,8 @@ def build_context(
     token_counter: TokenCounter = DEFAULT_TOKEN_COUNTER,
     summary: Message | None = None,
 ) -> ContextResult:
+    """外置超长工具正文，硬保留关键消息，并以近期优先顺序填充剩余预算。"""
+
     if budget.input_tokens < 0 or budget.output_tokens < 0:
         raise ValueError("Token budgets must be non-negative")
     if recent_message_count < 0 or tool_result_char_limit < 0:

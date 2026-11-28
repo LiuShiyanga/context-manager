@@ -24,6 +24,8 @@ DEBUG_ENABLED = False
 
 
 def get_provider():
+    """按环境配置延迟创建 provider，避免健康检查触发真实客户端初始化。"""
+
     mode = os.getenv("PROVIDER", "mock").lower()
     if mode == "anthropic":
         return AnthropicProvider()
@@ -33,10 +35,12 @@ def get_provider():
 
 
 class ProviderError(RuntimeError):
-    """Raised when a mock provider failure is simulated for the demo."""
+    """表示调试端点为演示错误处理而主动模拟的 provider 故障。"""
 
 
 class RealAnswerRequest(BaseModel):
+    """描述绕过构建器、直接验证当前 provider 问答能力的请求。"""
+
     messages: list[MessageRequest]
     question: str
     max_tokens: int = 300
@@ -44,17 +48,23 @@ class RealAnswerRequest(BaseModel):
     @field_validator("max_tokens")
     @classmethod
     def validate_max_tokens(cls, value: int) -> int:
+        """限制直接回答端点的输出预算，防止无界请求。"""
+
         if not 1 <= value <= 512:
             raise ValueError("max_tokens must be between 1 and 512")
         return value
 
 
 class DebugRequest(BaseModel):
+    """选择一个仅在显式开启调试模式后可触发的受控错误场景。"""
+
     scenario: str
 
     @field_validator("scenario")
     @classmethod
     def validate_scenario(cls, value: str) -> str:
+        """只接受预定义场景，避免把调试入口变成任意异常触发器。"""
+
         if value not in {"budget_unsatisfiable", "summary_failure", "artifact_missing"}:
             raise ValueError("Unsupported debug scenario")
         return value
@@ -83,6 +93,8 @@ def health():
 
 @router.post("/api/debug/trigger")
 def trigger_debug(request: DebugRequest):
+    """在调试开关启用时返回稳定的演示错误，默认对外隐藏该能力。"""
+
     if not DEBUG_ENABLED:
         raise HTTPException(status_code=404, detail=_error("debug_disabled", "Debug scenarios are disabled.")["error"])
     if request.scenario == "budget_unsatisfiable":
@@ -203,6 +215,8 @@ def build(request: ContextBuildRequest):
 
 @router.post("/api/context/answer")
 def context_answer(request: ContextAnswerRequest):
+    """压缩历史、构建预算内上下文、调用 provider，并返回完整审计元数据。"""
+
     provider = get_provider()
     conversation = to_conversation(request)
     budget = to_budget(request)
