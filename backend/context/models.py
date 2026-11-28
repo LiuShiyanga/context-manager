@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 
-Role = Literal["system", "user", "assistant", "tool", "summary"]
+Role = Literal["system", "user", "assistant", "tool", "summary", "memory"]
 
 
 @dataclass(frozen=True)

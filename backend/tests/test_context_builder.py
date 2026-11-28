@@ -1,8 +1,12 @@
+"""验证上下文选择、预算约束、结构化摘要和工具结果外置策略。"""
+
 from backend.context.builder import BudgetUnsatisfiableError, build_context
 from backend.context.models import Conversation, Message, TokenBudget
 
 
 def test_preserves_system_and_recent_messages_within_budget():
+    """确认紧预算下保留 system 和最新用户消息，并正确统计分区成本。"""
+
     conversation = Conversation(
         messages=[
             Message(id="s", role="system", content="You are helpful."),
@@ -24,6 +28,8 @@ def test_preserves_system_and_recent_messages_within_budget():
 
 
 def test_externalizes_long_tool_result_and_keeps_reference():
+    """确认长工具正文被外置，消息中保留可对应到原文的 artifact 引用。"""
+
     conversation = Conversation(
         messages=[
             Message(id="tool-1", role="tool", content="a very long tool result that should be externalized", tool_name="search"),
@@ -41,6 +47,8 @@ def test_externalizes_long_tool_result_and_keeps_reference():
 
 
 def test_builds_traceable_structured_summary_for_omitted_history():
+    """确认省略历史通过结构化摘要保留关键记忆和来源消息 ID。"""
+
     conversation = Conversation(
         messages=[
             Message(id="u-old", role="user", content="Original goal: migrate the service."),
@@ -57,16 +65,18 @@ def test_builds_traceable_structured_summary_for_omitted_history():
 
     result = build_context(conversation, TokenBudget(input_tokens=120, output_tokens=20), recent_message_count=1)
 
-    summary = next(message for message in result.messages if message.role == "summary")
+    summary = next(message for message in result.messages if message.id == "memory-required")
     assert "Migrate the service." in summary.content
     assert "Keep the API backward compatible." in summary.content
     assert "Update deployment docs." in summary.content
     assert "Tests passed after migration." in summary.content
     assert set(summary.source_ids) == {"u-old", "a-old", "tool-old"}
-    assert result.partitions["summary"] > 0
+    assert result.partitions["memory"] > 0
 
 
 def test_artifact_reference_is_stable_for_same_conversation():
+    """确认同一会话重复构建时生成相同的 artifact ID 和摘录。"""
+
     conversation = Conversation(
         session_id="stable-session",
         messages=[Message(id="tool-1", role="tool", content="x" * 100, tool_name="search")],
@@ -80,6 +90,8 @@ def test_artifact_reference_is_stable_for_same_conversation():
 
 
 def test_raises_without_dropping_required_messages_when_budget_is_too_small():
+    """确认必需消息无法容纳时抛出预算异常，而不是返回缺失上下文。"""
+
     conversation = Conversation(
         messages=[
             Message(id="s", role="system", content="System requirement."),

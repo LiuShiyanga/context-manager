@@ -8,9 +8,11 @@ from backend.context.tokens import DEFAULT_TOKEN_COUNTER, TokenCounter
 
 
 class BudgetUnsatisfiableError(ValueError):
-    def __init__(self, required_tokens: int, required_message_ids: list[str]):
+    def __init__(self, required_tokens: int, required_message_ids: list[str], input_budget: int = 0):
         self.required_tokens = required_tokens
         self.required_message_ids = required_message_ids
+        self.excess_tokens = max(0, required_tokens - input_budget)
+        self.suggestions = ["Increase the input budget", "Shorten required memory fields"]
         super().__init__(f"Required messages need {required_tokens} tokens")
 
 
@@ -30,6 +32,7 @@ def build_context(
     recent_message_count: int = 8,
     tool_result_char_limit: int = 1200,
     token_counter: TokenCounter = DEFAULT_TOKEN_COUNTER,
+    summary: Message | None = None,
 ) -> ContextResult:
     if budget.input_tokens < 0 or budget.output_tokens < 0:
         raise ValueError("Token budgets must be non-negative")
@@ -51,12 +54,21 @@ def build_context(
         else:
             prepared.append(message)
 
+    memory_parts = [
+        f"Objective: {conversation.objective}" if conversation.objective else "",
+        f"Constraints: {'; '.join(conversation.constraints)}" if conversation.constraints else "",
+        f"Decisions: {'; '.join(conversation.decisions)}" if conversation.decisions else "",
+        f"Unfinished todos: {'; '.join(conversation.todos)}" if conversation.todos else "",
+        f"Tool conclusions: {'; '.join(conversation.tool_conclusions)}" if conversation.tool_conclusions else "",
+    ]
+    memory_content = "\n".join(part for part in memory_parts if part)
+    memory = Message(id="memory-required", role="summary", content=memory_content) if memory_content else None
     system = [message for message in prepared if message.role == "system"]
     latest_user = next((message for message in reversed(prepared) if message.role == "user"), None)
-    required = system + ([latest_user] if latest_user and latest_user not in system else [])
+    required = system + ([memory] if memory else []) + ([latest_user] if latest_user and latest_user not in system else [])
     required_tokens = sum(_message_tokens(message, token_counter) for message in required)
     if required_tokens > budget.input_tokens:
-        raise BudgetUnsatisfiableError(required_tokens, [message.id for message in required])
+        raise BudgetUnsatisfiableError(required_tokens, [message.id for message in required], budget.input_tokens)
 
     selected: list[Message] = list(required)
     selected_ids = {message.id for message in selected}
@@ -73,8 +85,10 @@ def build_context(
             remaining -= cost
 
     omitted = [message for message in prepared if message.id not in selected_ids and message.role != "system"]
-    summary = None
-    if omitted:
+    if memory:
+        selected = [replace(message, source_ids=[item.id for item in omitted]) if message.id == memory.id else message for message in selected]
+    candidate_summary = summary
+    if candidate_summary is None and omitted and not memory:
         source_ids = [message.id for message in omitted]
         summary_content = "\n".join(
             part for part in [
@@ -86,17 +100,18 @@ def build_context(
             ] if part
         )
         if summary_content:
-            summary = Message(id="summary-generated", role="summary", content=summary_content, source_ids=source_ids)
-            summary_cost = _message_tokens(summary, token_counter)
-            if summary_cost <= remaining:
-                selected.append(summary)
-                selected_ids.add(summary.id)
-                remaining -= summary_cost
+            candidate_summary = Message(id="summary-generated", role="summary", content=summary_content, source_ids=source_ids)
+    if candidate_summary and candidate_summary.id not in selected_ids:
+        summary_cost = _message_tokens(candidate_summary, token_counter)
+        if summary_cost <= remaining:
+            selected.append(candidate_summary)
+            selected_ids.add(candidate_summary.id)
+            remaining -= summary_cost
 
     selected.sort(key=lambda message: next((index for index, source in enumerate(prepared) if source.id == message.id), len(prepared)))
-    counts = {"system": 0, "summary": 0, "recent": 0, "tools": 0}
+    counts = {"system": 0, "memory": 0, "summary": 0, "recent": 0, "tools": 0}
     for message in selected:
-        key = "system" if message.role == "system" else "summary" if message.role == "summary" else "tools" if message.role == "tool" else "recent"
+        key = "system" if message.role == "system" else "memory" if message.id == "memory-required" else "summary" if message.role == "summary" else "tools" if message.role == "tool" else "recent"
         counts[key] += _message_tokens(message, token_counter)
     total = sum(counts.values())
     return ContextResult(

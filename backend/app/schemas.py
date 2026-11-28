@@ -18,7 +18,7 @@ class MessageRequest(BaseModel):
     @field_validator("role")
     @classmethod
     def validate_role(cls, value: str) -> str:
-        if value not in {"system", "user", "assistant", "tool", "summary"}:
+        if value not in {"system", "user", "assistant", "tool", "summary", "memory"}:
             raise ValueError("Unsupported message role")
         return value
 
@@ -57,6 +57,18 @@ class ContextBuildRequest(BaseModel):
             raise ValueError("Budget only accepts input_tokens and output_tokens")
         if value.get("input_tokens", 0) < 0 or value.get("output_tokens", 0) < 0:
             raise ValueError("Token budgets must be non-negative")
+        return value
+
+
+class ContextAnswerRequest(ContextBuildRequest):
+    question: str
+    force_compress: bool = False
+
+    @field_validator("question")
+    @classmethod
+    def validate_question(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Question cannot be empty")
         return value
 
 

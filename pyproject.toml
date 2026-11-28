@@ -1,22 +1,29 @@
+# 使用 setuptools 构建后端创建可安装的 Python 项目。
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
+# 项目元数据及启动 API 所需的最小运行依赖。
 [project]
 name = "context-manager-demo"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
+  "anthropic>=0.75,<1",
   "fastapi>=0.115,<1",
+  "python-dotenv>=1,<2",
   "uvicorn[standard]>=0.30,<1",
 ]
 
+# 开发依赖只包含测试运行和 TestClient 所需组件。
 [project.optional-dependencies]
 dev = ["pytest>=8,<10", "httpx>=0.27,<1"]
 
+# pytest 从仓库根目录导入 backend，并只收集后端回归测试目录。
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["backend/tests"]
 
+# 打包时仅发现 backend 命名空间，前端由 FastAPI 静态目录直接托管。
 [tool.setuptools.packages.find]
 include = ["backend*"]
